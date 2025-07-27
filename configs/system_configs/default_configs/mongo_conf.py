@@ -1,5 +1,5 @@
-MONGODB_HOST = "localhost"
+MONGODB_HOST = 'localhost'
 MONGODB_PORT = 27017
-MONGODB_DB = "tiger_etl_mongo_db"
-MONGODB_USER = "admin"
-MONGODB_PASSWORD = "1234"
+MONGODB_DB = 'tiger_etl_mongo_db'
+MONGODB_USER = 'admin'
+MONGODB_PASSWORD = '1234'
