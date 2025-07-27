@@ -1,0 +1,34 @@
+# Ignore Python virtual environments
+venv/
+ENV/
+env/
+
+# Ignore Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore logs and temp files
+*.log
+*.tmp
+
+# Ignore VS Code settings
+.vscode/
+
+# Ignore test coverage reports
+htmlcov/
+.coverage
+coverage.xml
+
+# Ignore build artifacts
+build/
+dist/
+*.egg-
