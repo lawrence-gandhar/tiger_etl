@@ -1,5 +1,5 @@
 PORT = 8000
-HOST = 127.0.0.1
+HOST = "localhost"
 DEBUG = True
 ALLOWED_HOSTS = ['*', 'localhost']
 
