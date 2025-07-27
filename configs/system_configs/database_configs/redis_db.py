@@ -1,0 +1,2 @@
+from configs.system_configs.default_configs.redis_conf import REDIS_URL
+
