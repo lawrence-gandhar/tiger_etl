@@ -74,3 +74,11 @@ class SQLAlchemyUpdateError(SQLAlchemyCRUDException):
 class SQLAlchemyDeleteError(SQLAlchemyCRUDException):
     """Raised when SQLAlchemy delete fails."""
     pass
+
+class MongoConnectionError(Exception):
+    """Raised when a MongoDB connection fails."""
+    pass
+
+class MongoCRUDError(Exception):
+    """Raised when a MongoDB CRUD operation fails."""
+    pass
