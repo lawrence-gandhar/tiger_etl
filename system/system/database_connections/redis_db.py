@@ -1,6 +1,6 @@
 import redis
-from configs.system_configs.default_configs.redis_conf import REDIS_URL
-from configs.system_configs.database_connections.exceptions import (
+from system.system.default_configs.redis_conf import REDIS_URL
+from system.system.database_connections.exceptions import (
     RedisConnectionError,
     RedisInsertError,
     RedisReadError,

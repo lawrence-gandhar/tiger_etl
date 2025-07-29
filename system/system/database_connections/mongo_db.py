@@ -1,9 +1,9 @@
 from pymongo import MongoClient
-from configs.system_configs.default_configs.mongo_conf import (
+from system.system.default_configs.mongo_conf import (
     MONGODB_URI,
     MONGODB_DB
 )
-from configs.system_configs.database_connections.exceptions import (
+from system.system.database_connections.exceptions import (
     MongoConnectionError,
     MongoCRUDError
 )

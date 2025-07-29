@@ -9,14 +9,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.engine import Engine
 from typing import Optional, Dict, Any, List
 
-from configs.system_configs.database_connections.exceptions import (
+from system.system.database_connections.exceptions import (
     SQLAlchemyConnectionError,
     SQLAlchemyInsertError,
     SQLAlchemyReadError,
     SQLAlchemyUpdateError,
     SQLAlchemyDeleteError
 )
-from configs.system_configs.default_configs.postgres_db_conf import POSTGRES_URL
+from system.system.default_configs.postgres_db_conf import POSTGRES_URL
 
 class PostgresDB:
     """

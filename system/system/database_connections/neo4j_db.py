@@ -5,12 +5,12 @@ Uses constants from default_configs/neo4j_conf.py and custom exceptions from exc
 """
 
 from neo4j import GraphDatabase, basic_auth
-from configs.system_configs.default_configs.neo4j_conf import (
+from system.system.default_configs.neo4j_conf import (
     NEO4J_URI,
     NEO4J_USER,
     NEO4J_PASSWORD
 )
-from configs.system_configs.database_connections.exceptions import (
+from system.system.database_connections.exceptions import (
     DatabaseConnectionError,
     DatabaseInsertError,
     DatabaseDeleteError
