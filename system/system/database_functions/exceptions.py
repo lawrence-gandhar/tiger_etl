@@ -53,3 +53,8 @@ class UserGroupInUseError(UserGroupManagementError):
 class TransactionRollbackError(DatabaseFunctionError):
     """Raised when a database transaction rollback fails."""
     pass
+
+
+class UserAlreadyExistsException(DatabaseFunctionError):
+    """Raised when a user with the given unique field already exists."""
+    pass

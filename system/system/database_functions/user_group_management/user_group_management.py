@@ -9,7 +9,8 @@ import logging
 from typing import Dict, Any, List, Tuple
 from contextlib import contextmanager
 
-from system.system.database_connections.pg_db import PostgresDB
+from sqlalchemy.orm import Session
+from system.system.database_connections.pg_db import get_session, PostgresDB
 from system.system.database_connections.exceptions import (
     SQLAlchemyDeleteError,
     SQLAlchemyReadError,
@@ -51,22 +52,23 @@ MAPPING_ID_INTEGER_ERROR = "Mapping ID must be a valid integer"
 
 @contextmanager
 def get_db_connection():
-    """Context manager for database connections with automatic cleanup.
-    
+    """Context manager for SQLAlchemy session with automatic cleanup.
+
     Yields:
-        PostgresDB: Database connection instance
-        
+        Session: SQLAlchemy session instance
+
     Ensures:
-        Database connection is properly closed even if an exception occurs
+        Session is properly closed even if an exception occurs
     """
-    db = PostgresDB()
+    session: Session = get_session()
     try:
-        yield db
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     finally:
-        try:
-            db.close()
-        except Exception as e:
-            logger.warning(f"Failed to close database connection: {e}")
+        session.close()
 
 
 def validate_group_id(group_id: Any) -> int:
@@ -95,7 +97,7 @@ def validate_group_id(group_id: Any) -> int:
     return group_id
 
 
-def check_group_exists(db_instance: PostgresDB, group_id: int) -> Dict[str, Any]:
+def check_group_exists(db_instance: Any, group_id: int) -> Dict[str, Any]:
     """Check if a user group exists in the database.
     
     Args:
@@ -1298,8 +1300,6 @@ def update_user_group_mapping(mapping_id: Any, update_data: Dict[str, Any]) -> D
         UserGroupValidationError: If validation fails
         UserGroupMapperError: If mapping doesn't exist or update fails
     """
-    # Validate using Pydantic
-    validated_mapping_id = validate_positive_integer(mapping_id, "Mapping ID")
     # Validate using Pydantic
     validated_mapping_id = validate_positive_integer(mapping_id, "Mapping ID")
     validated_update_data = validate_mapping_update_data(update_data)
