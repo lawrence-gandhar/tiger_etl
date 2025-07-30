@@ -58,3 +58,33 @@ class TransactionRollbackError(DatabaseFunctionError):
 class UserAlreadyExistsException(DatabaseFunctionError):
     """Raised when a user with the given unique field already exists."""
     pass
+
+
+class UserManagementError(DatabaseFunctionError):
+    """Base exception for user management operations."""
+    pass
+
+
+class UserNotFoundError(UserManagementError):
+    """Raised when a user is not found."""
+    pass
+
+
+class UserCreateError(UserManagementError):
+    """Raised when user creation fails."""
+    pass
+
+
+class UserUpdateError(UserManagementError):
+    """Raised when user update fails."""
+    pass
+
+
+class UserDeleteError(UserManagementError):
+    """Raised when user deletion fails."""
+    pass
+
+
+class UserValidationError(UserManagementError):
+    """Raised when user validation fails."""
+    pass
