@@ -37,17 +37,15 @@ from system.system.database_functions.user_group_management.validations import (
     validate_user_group_activation,
     validate_positive_integer,
 )
+from system.system.constants.model_constants.user_group_management_constants import (
+    USER_GROUPS_TABLE,
+    USER_GROUP_MAPPER_TABLE,
+    MAPPING_ID_POSITIVE_ERROR,
+    MAPPING_ID_INTEGER_ERROR,
+)
 
 # Set up logging
 logger = logging.getLogger(__name__)
-
-# Table names - using constants for better maintainability
-USER_GROUPS_TABLE = 'user_groups'
-USER_GROUP_MAPPER_TABLE = 'user_group_mapper'
-
-# Error message constants
-MAPPING_ID_POSITIVE_ERROR = "Mapping ID must be a positive integer"
-MAPPING_ID_INTEGER_ERROR = "Mapping ID must be a valid integer"
 
 
 @contextmanager

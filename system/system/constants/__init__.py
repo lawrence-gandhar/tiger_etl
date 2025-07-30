@@ -1,6 +1,6 @@
 """Constants package for the application."""
 
-from system.system.constants.models_constants.user_management_constants import (
+from system.system.constants.model_constants.user_management_constants import (
     USERNAME_EMPTY_ERROR,
     USERNAME_FORMAT_ERROR,
     USERNAME_START_ERROR,

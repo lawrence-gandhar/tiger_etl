@@ -75,6 +75,18 @@ class SQLAlchemyDeleteError(SQLAlchemyCRUDException):
     """Raised when SQLAlchemy delete fails."""
     pass
 
+class SQLAlchemyTableCreationError(SQLAlchemyCRUDException):
+    """Raised when SQLAlchemy table creation fails."""
+    pass
+
+class SQLAlchemyTableValidationError(SQLAlchemyCRUDException):
+    """Raised when table definition validation fails."""
+    pass
+
+class SQLAlchemyTableExistsError(SQLAlchemyCRUDException):
+    """Raised when attempting to create a table that already exists."""
+    pass
+
 class MongoConnectionError(Exception):
     """Raised when a MongoDB connection fails."""
     pass
