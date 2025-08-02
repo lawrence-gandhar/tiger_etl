@@ -16,3 +16,13 @@ class User(Base):
     
     def __repr__(self):
         return f"<User(id={self.id}, username='{self.username}', is_active={self.is_active})>"
+    
+    def to_dict(self):
+        """Convert the model instance to a dictionary."""
+        return {
+            'id': self.id,
+            'username': self.username,
+            'first_name': self.first_name,
+            'last_name': self.last_name,
+            'is_active': self.is_active
+        }
