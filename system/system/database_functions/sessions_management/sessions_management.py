@@ -64,6 +64,15 @@ from system.system.database_functions.sessions_management.sessions_management_co
     IP_ADDRESS_NON_EMPTY_STRING,
     ACTIVE_SESSION_NOT_FOUND
 )
+from system.system.database_functions.sessions_management.validations import (
+    SessionCreate,
+    SessionUpdate,
+    SessionSearch,
+    SessionActivityUpdate,
+    SessionLogout,
+    SessionCleanup,
+    BulkSessionOperation
+)
 
 
 class SessionManager:
@@ -109,8 +118,8 @@ class SessionManager:
     def create_session(self, session_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new session in the database.
         
-        Validates the session data and creates a new session record. Checks for existing
-        sessions with the same session_id to prevent duplicates.
+        Validates the session data using Pydantic models and creates a new session record. 
+        Checks for existing sessions with the same session_id to prevent duplicates.
         
         Args:
             session_data: Dictionary containing session information (user_id and session_id required)
@@ -137,19 +146,20 @@ class SessionManager:
             >>> print(new_session["session_id"])
             unique-session-token-12345
         """
-        # Validate required fields
-        self._validate_session_data_for_creation(session_data)
-        
         try:
+            # Validate session data using Pydantic model
+            validated_data = SessionCreate(**session_data)
+            processed_data = validated_data.dict(exclude_unset=True)
+            
             db = self._get_db_connection()
             
             # Check if session already exists
-            existing_sessions = db.read(USER_SESSIONS_TABLE, {'session_id': session_data['session_id']})
+            existing_sessions = db.read(USER_SESSIONS_TABLE, {'session_id': processed_data['session_id']})
             if existing_sessions:
                 raise SessionAlreadyExistsError(SESSION_ALREADY_EXISTS)
             
             # Set default values for session creation
-            processed_data = self._prepare_session_data_for_creation(session_data)
+            processed_data = self._prepare_session_data_for_creation(processed_data)
             
             # Create the session
             created_session = db.create(USER_SESSIONS_TABLE, processed_data)
@@ -158,6 +168,9 @@ class SessionManager:
             else:
                 raise SessionCreateError("Failed to create session")
                 
+        except ValueError as e:
+            # Pydantic validation error
+            raise SessionValidationError(f"Validation error: {e}") from e
         except SQLAlchemyInsertError as e:
             raise SessionCreateError(f"Database error creating session: {e}") from e
         except Exception as e:
@@ -306,7 +319,7 @@ class SessionManager:
     def update_session(self, session_id: int, update_data: Dict[str, Any]) -> Dict[str, Any]:
         """Update an existing session's information.
         
-        Performs partial updates - only provided fields will be modified.
+        Performs partial updates using Pydantic validation - only provided fields will be modified.
         Validates the session exists before attempting the update.
         
         Args:
@@ -330,15 +343,16 @@ class SessionManager:
         self._validate_session_id_int(session_id)
         
         try:
+            # Validate update data using Pydantic model
+            validated_data = SessionUpdate(**update_data)
+            processed_data = validated_data.dict(exclude_unset=True)
+            
             db = self._get_db_connection()
             
             # Check if session exists
             sessions = db.read(USER_SESSIONS_TABLE, {'id': session_id})
             if not sessions:
                 raise SessionNotFoundError(SESSION_NOT_FOUND)
-            
-            # Prepare update data
-            processed_data = self._prepare_session_data_for_update(update_data)
             
             # Update the session
             updated_sessions = db.update(USER_SESSIONS_TABLE, processed_data, {'id': session_id})
@@ -347,6 +361,9 @@ class SessionManager:
             else:
                 raise SessionUpdateError("Failed to update session")
                 
+        except ValueError as e:
+            # Pydantic validation error
+            raise SessionValidationError(f"Validation error: {e}") from e
         except SQLAlchemyUpdateError as e:
             raise SessionUpdateError(f"Database error updating session: {e}") from e
         except Exception as e:
@@ -371,26 +388,29 @@ class SessionManager:
             >>> updated_session = session_manager.update_session_activity("unique-session-token-12345")
             >>> print("Activity updated")
         """
-        if not session_id or not isinstance(session_id, str):
-            raise SessionValidationError(SESSION_ID_NON_EMPTY_STRING)
-        
         try:
+            # Validate session ID using Pydantic model
+            validated_data = SessionActivityUpdate(session_id=session_id)
+            
             db = self._get_db_connection()
             
             # Check if session exists and is active
-            sessions = db.read(USER_SESSIONS_TABLE, {'session_id': session_id, 'is_active': True})
+            sessions = db.read(USER_SESSIONS_TABLE, {'session_id': validated_data.session_id, 'is_active': True})
             if not sessions:
                 raise SessionNotFoundError(ACTIVE_SESSION_NOT_FOUND)
             
             # Update last activity
             update_data = {'last_activity': datetime.now(timezone.utc)}
-            updated_sessions = db.update(USER_SESSIONS_TABLE, update_data, {'session_id': session_id})
+            updated_sessions = db.update(USER_SESSIONS_TABLE, update_data, {'session_id': validated_data.session_id})
             
             if updated_sessions:
                 return dict(updated_sessions[0]._mapping)
             else:
                 raise SessionUpdateError("Failed to update session activity")
                 
+        except ValueError as e:
+            # Pydantic validation error
+            raise SessionValidationError(f"Validation error: {e}") from e
         except SQLAlchemyUpdateError as e:
             raise SessionUpdateError(f"Database error updating session activity: {e}") from e
         except Exception as e:
@@ -415,14 +435,14 @@ class SessionManager:
             >>> ended_session = session_manager.logout_session("unique-session-token-12345")
             >>> print(f"Session ended at: {ended_session['logout_datetime']}")
         """
-        if not session_id or not isinstance(session_id, str):
-            raise SessionValidationError(SESSION_ID_NON_EMPTY_STRING)
-        
         try:
+            # Validate session ID using Pydantic model
+            validated_data = SessionLogout(session_id=session_id)
+            
             db = self._get_db_connection()
             
             # Check if session exists and is active
-            sessions = db.read(USER_SESSIONS_TABLE, {'session_id': session_id, 'is_active': True})
+            sessions = db.read(USER_SESSIONS_TABLE, {'session_id': validated_data.session_id, 'is_active': True})
             if not sessions:
                 raise SessionNotFoundError(ACTIVE_SESSION_NOT_FOUND)
             
@@ -446,13 +466,16 @@ class SessionManager:
                     update_data['session_duration'] = int(duration)
             
             # Update the session
-            updated_sessions = db.update(USER_SESSIONS_TABLE, update_data, {'session_id': session_id})
+            updated_sessions = db.update(USER_SESSIONS_TABLE, update_data, {'session_id': validated_data.session_id})
             
             if updated_sessions:
                 return dict(updated_sessions[0]._mapping)
             else:
                 raise SessionUpdateError("Failed to logout session")
                 
+        except ValueError as e:
+            # Pydantic validation error
+            raise SessionValidationError(f"Validation error: {e}") from e
         except SQLAlchemyUpdateError as e:
             raise SessionUpdateError(f"Database error logging out session: {e}") from e
         except Exception as e:
@@ -525,26 +548,138 @@ class SessionManager:
             >>> count = session_manager.delete_user_sessions(123, keep_active=True)
             >>> print(f"Deleted {count} inactive sessions")
         """
-        self._validate_user_id(user_id)
-        
         try:
+            # Validate bulk operation data using Pydantic model
+            validated_data = BulkSessionOperation(user_id=user_id, keep_active=keep_active)
+            
             db = self._get_db_connection()
             
             # Build delete criteria
-            delete_criteria = {'user_id': user_id}
-            if keep_active:
+            delete_criteria = {'user_id': validated_data.user_id}
+            if validated_data.keep_active:
                 delete_criteria['is_active'] = False
             
             # Delete sessions
             deleted_count = db.delete(USER_SESSIONS_TABLE, delete_criteria)
             return deleted_count
             
+        except ValueError as e:
+            # Pydantic validation error
+            raise SessionValidationError(f"Validation error: {e}") from e
         except SQLAlchemyDeleteError as e:
             raise SessionDeleteError(f"Database error deleting user sessions: {e}") from e
         except Exception as e:
             if isinstance(e, SessionValidationError):
                 raise
             raise SessionDeleteError(f"Unexpected error deleting user sessions: {e}") from e
+
+    def search_sessions(self, search_criteria: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Search for sessions using comprehensive criteria.
+        
+        Args:
+            search_criteria: Dictionary containing search parameters
+            
+        Returns:
+            List of dictionaries containing matching session data
+            
+        Example:
+            >>> session_manager = SessionManager()
+            >>> search_criteria = {
+            ...     "user_id": 123,
+            ...     "is_active": True,
+            ...     "limit": 50
+            ... }
+            >>> sessions = session_manager.search_sessions(search_criteria)
+            >>> print(f"Found {len(sessions)} matching sessions")
+        """
+        try:
+            # Validate search criteria using Pydantic model
+            validated_data = SessionSearch(**search_criteria)
+            
+            db = self._get_db_connection()
+            
+            # Build search criteria for database query
+            db_criteria = {}
+            if validated_data.user_id is not None:
+                db_criteria['user_id'] = validated_data.user_id
+            if validated_data.session_id is not None:
+                db_criteria['session_id'] = validated_data.session_id
+            if validated_data.ip_address is not None:
+                db_criteria['ip_address'] = validated_data.ip_address
+            if validated_data.is_active is not None:
+                db_criteria['is_active'] = validated_data.is_active
+            
+            # Get sessions from database
+            sessions = db.read(USER_SESSIONS_TABLE, db_criteria)
+            sessions_list = [dict(session._mapping) for session in sessions]
+            
+            # Apply datetime filters if specified
+            if validated_data.login_datetime_from or validated_data.login_datetime_to:
+                sessions_list = self._filter_by_login_datetime(
+                    sessions_list, 
+                    validated_data.login_datetime_from,
+                    validated_data.login_datetime_to
+                )
+            
+            if validated_data.last_activity_from or validated_data.last_activity_to:
+                sessions_list = self._filter_by_last_activity(
+                    sessions_list,
+                    validated_data.last_activity_from,
+                    validated_data.last_activity_to
+                )
+            
+            # Sort by login_datetime descending (most recent first)
+            sessions_list.sort(key=lambda x: x.get('login_datetime', ''), reverse=True)
+            
+            # Apply pagination
+            offset = validated_data.offset or 0
+            limit = validated_data.limit or 100
+            
+            return sessions_list[offset:offset + limit]
+            
+        except ValueError as e:
+            # Pydantic validation error
+            raise SessionValidationError(f"Validation error: {e}") from e
+        except SQLAlchemyReadError as e:
+            raise SessionNotFoundError(f"Database error searching sessions: {e}") from e
+        except Exception as e:
+            if isinstance(e, SessionValidationError):
+                raise
+            raise SessionNotFoundError(f"Unexpected error searching sessions: {e}") from e
+    
+    def _filter_by_login_datetime(self, sessions: List[Dict], from_dt, to_dt) -> List[Dict]:
+        """Filter sessions by login datetime range."""
+        if not from_dt and not to_dt:
+            return sessions
+        
+        filtered = []
+        for session in sessions:
+            login_dt = session.get('login_datetime')
+            if login_dt:
+                if from_dt and login_dt < from_dt:
+                    continue
+                if to_dt and login_dt > to_dt:
+                    continue
+                filtered.append(session)
+        
+        return filtered
+    
+    def _filter_by_last_activity(self, sessions: List[Dict], from_dt, to_dt) -> List[Dict]:
+        """Filter sessions by last activity datetime range."""
+        if not from_dt and not to_dt:
+            return sessions
+        
+        filtered = []
+        for session in sessions:
+            activity_dt = session.get('last_activity')
+            if activity_dt:
+                if from_dt and activity_dt < from_dt:
+                    continue
+                if to_dt and activity_dt > to_dt:
+                    continue
+                filtered.append(session)
+        
+        return filtered
 
     def get_sessions_by_ip(self, ip_address: str, limit: int = 100) -> List[Dict[str, Any]]:
         """Retrieve sessions by IP address for security monitoring.
@@ -617,48 +752,65 @@ class SessionManager:
             >>> print(f"Cleaned up {cleaned} expired sessions")
         """
         try:
+            # Validate cleanup parameters using Pydantic model
+            validated_data = SessionCleanup(hours_inactive=hours_inactive)
+            
             db = self._get_db_connection()
             
             # Calculate cutoff time
-            cutoff_time = datetime.now(timezone.utc) - timezone.timedelta(hours=hours_inactive)
+            cutoff_time = datetime.now(timezone.utc) - timezone.timedelta(hours=validated_data.hours_inactive)
             
             # Find expired sessions (active but last_activity older than cutoff)
             all_active_sessions = db.read(USER_SESSIONS_TABLE, {'is_active': True})
-            expired_sessions = []
-            
-            for session in all_active_sessions:
-                session_data = dict(session._mapping)
-                last_activity = session_data.get('last_activity')
-                
-                if last_activity:
-                    if hasattr(last_activity, 'replace'):  # datetime object
-                        if last_activity.tzinfo is None:
-                            last_activity = last_activity.replace(tzinfo=timezone.utc)
-                        if last_activity < cutoff_time:
-                            expired_sessions.append(session_data['id'])
+            expired_sessions = self._find_expired_sessions(all_active_sessions, cutoff_time)
             
             # Update expired sessions to inactive
-            cleanup_count = 0
-            logout_time = datetime.now(timezone.utc)
-            
-            for session_id in expired_sessions:
-                try:
-                    update_data = {
-                        'is_active': False,
-                        'logout_datetime': logout_time
-                    }
-                    updated = db.update(USER_SESSIONS_TABLE, update_data, {'id': session_id})
-                    if updated:
-                        cleanup_count += 1
-                except Exception:
-                    continue  # Skip failed updates
+            cleanup_count = self._deactivate_expired_sessions(db, expired_sessions)
             
             return cleanup_count
             
+        except ValueError as e:
+            # Pydantic validation error
+            raise SessionValidationError(f"Validation error: {e}") from e
         except SQLAlchemyReadError as e:
             raise SessionNotFoundError(f"Database error during cleanup: {e}") from e
         except Exception as e:
             raise SessionDeleteError(f"Unexpected error during cleanup: {e}") from e
+    
+    def _find_expired_sessions(self, active_sessions, cutoff_time) -> List[int]:
+        """Find sessions that have expired based on last activity."""
+        expired_sessions = []
+        
+        for session in active_sessions:
+            session_data = dict(session._mapping)
+            last_activity = session_data.get('last_activity')
+            
+            if last_activity and hasattr(last_activity, 'replace'):  # datetime object
+                if last_activity.tzinfo is None:
+                    last_activity = last_activity.replace(tzinfo=timezone.utc)
+                if last_activity < cutoff_time:
+                    expired_sessions.append(session_data['id'])
+        
+        return expired_sessions
+    
+    def _deactivate_expired_sessions(self, db, expired_sessions: List[int]) -> int:
+        """Deactivate expired sessions and return count."""
+        cleanup_count = 0
+        logout_time = datetime.now(timezone.utc)
+        
+        for session_id in expired_sessions:
+            try:
+                update_data = {
+                    'is_active': False,
+                    'logout_datetime': logout_time
+                }
+                updated = db.update(USER_SESSIONS_TABLE, update_data, {'id': session_id})
+                if updated:
+                    cleanup_count += 1
+            except Exception:
+                continue  # Skip failed updates
+        
+        return cleanup_count
 
     def close(self) -> None:
         """Close method for backward compatibility.

@@ -47,7 +47,7 @@ from system.system.database_functions.exceptions import (
     UserAlreadyExistsException,
 )
 from system.system.database_functions.user_management.user_management_constants import USER_ALREADY_EXISTS, USER_NOT_FOUND, USERS_TABLE
-from system.system.database_functions.user_management.validations import UserCreate, UserUpdate, validate_user_id
+from system.system.database_functions.user_management.validations import UserCreate, UserUpdate
 
 
 class UserManager:
@@ -122,6 +122,18 @@ class UserManager:
             finally:
                 db.close()
 
+    def _validate_user_id(self, user_id: int) -> None:
+        """Validate that user_id is a positive integer.
+        
+        Args:
+            user_id: The user ID to validate
+            
+        Raises:
+            ValueError: If user_id is not a positive integer
+        """
+        if not isinstance(user_id, int) or user_id <= 0:
+            raise ValueError("User ID must be a positive integer")
+
     def create_user(self, user_data: Dict[str, Any], join: int = 0) -> Dict[str, Any]:
         """Create a new user in the database.
         
@@ -193,7 +205,10 @@ class UserManager:
             >>> user_with_relations = user_manager.get_user_by_id(1, join=1)
             >>> # May include additional related data based on database schema
         """
-        validate_user_id(user_id)
+        # Validate user_id is a positive integer
+        if not isinstance(user_id, int) or user_id <= 0:
+            raise ValueError("User ID must be a positive integer")
+            
         try:
             with self._get_db_connection() as db:
                 users = db.read(USERS_TABLE, {'id': user_id}, join=join)
@@ -264,7 +279,7 @@ class UserManager:
             ... }
             >>> updated_user = user_manager.update_user(1, update_data)
         """
-        validate_user_id(user_id)
+        self._validate_user_id(user_id)
         validated_data = UserUpdate(**update_data)
         try:
             with self._get_db_connection() as db:
@@ -310,7 +325,7 @@ class UserManager:
             ... except UserNotFoundError:
             ...     print("User successfully deleted")
         """
-        validate_user_id(user_id)
+        self._validate_user_id(user_id)
         try:
             with self._get_db_connection() as db:
                 # Check if user exists
@@ -352,7 +367,7 @@ class UserManager:
             return 0
         
         for user_id in user_ids:
-            validate_user_id(user_id)
+            self._validate_user_id(user_id)
             
         try:
             with self._get_db_connection() as db:
@@ -411,7 +426,7 @@ class UserManager:
         
         # Validate all user IDs first
         for user_id in user_ids:
-            validate_user_id(user_id)
+            self._validate_user_id(user_id)
         
         try:
             with self._get_db_connection() as db:
@@ -583,7 +598,7 @@ class UserManager:
             ... else:
             ...     print("User not found")
         """
-        validate_user_id(user_id)
+        self._validate_user_id(user_id)
         try:
             with self._get_db_connection() as db:
                 users = db.read(USERS_TABLE, {'id': user_id})

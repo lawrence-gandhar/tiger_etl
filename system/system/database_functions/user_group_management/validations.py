@@ -5,655 +5,517 @@ management operations, including user groups, user-group mappings, and related
 operations with comprehensive field validation and business rules.
 """
 
-from typing import Any, Dict, List, Optional, Annotated
+import re
+from typing import List, Optional
 from datetime import datetime
 from pydantic import (
     BaseModel, 
     Field, 
     field_validator, 
-    model_validator,
-    ValidationError as PydanticValidationError,
     ConfigDict
 )
 
-from system.system.database_functions.exceptions import UserGroupValidationError
+# Import from database_functions for now, but this should be moved to a central location
+
+# User Group validation constants
+GROUP_NAME_EMPTY_ERROR = "Group name cannot be empty"
+GROUP_NAME_FORMAT_ERROR = "Group name can only contain letters, numbers, spaces, underscores, and hyphens"
+GROUP_NAME_LENGTH_ERROR = "Group name must be between 1 and 100 characters"
+USER_ID_INVALID_ERROR = "User ID must be a positive integer"
+GROUP_ID_INVALID_ERROR = "Group ID must be a positive integer"
 
 
-# ============================================================================
-# Base Models and Common Validators
-# ============================================================================
-
-class BaseUserGroupModel(BaseModel):
-    """Base model with common configuration for user group models."""
+class UserGroupBase(BaseModel):
+    """Base Pydantic model for UserGroup with common fields.
     
-    model_config = ConfigDict(
-        validate_assignment=True,
-        use_enum_values=True,
-        populate_by_name=True,
-        str_strip_whitespace=True
+    This model contains the common fields and validations that are shared
+    across different user group operations.
+    
+    Attributes:
+        group_name: Unique group name (max 100 characters)
+        is_active: Boolean flag for group status (default: True)
+    """
+    
+    group_name: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Unique group name (1-100 characters)"
+    )
+    is_active: bool = Field(
+        default=True,
+        description="Group active status"
     )
 
-
-class PositiveInt(BaseModel):
-    """Model for validating positive integers."""
-    value: Annotated[int, Field(gt=0, description="Must be a positive integer")]
-    
-    @classmethod
-    def validate_id(cls, value: Any, field_name: str = "ID") -> int:
-        """Validate and return a positive integer ID.
-        
-        Args:
-            value: Value to validate
-            field_name: Name of the field for error messages
-            
-        Returns:
-            int: Validated positive integer
-            
-        Raises:
-            UserGroupValidationError: If validation fails
-        """
-        try:
-            validated = cls(value=value)
-            return validated.value
-        except PydanticValidationError as e:
-            error_details = e.errors()[0]
-            error_msg = error_details.get('msg', str(e))
-            raise UserGroupValidationError(f"{field_name} {error_msg}: {value}")
-
-
-# ============================================================================
-# User Group Models
-# ============================================================================
-
-class UserGroupCreateModel(BaseUserGroupModel):
-    """Model for validating user group creation data."""
-    
-    group_name: Annotated[str, Field(min_length=2, max_length=100, description="Group name (2-100 characters)")]
-    description: Annotated[str, Field(description="Group description")]
-    is_active: bool = Field(default=True, description="Whether the group is active")
-    created_by: Optional[str] = Field(default=None, description="User who created the group")
-    
     @field_validator('group_name')
     @classmethod
     def validate_group_name(cls, v: str) -> str:
-        """Validate group name format and content."""
-        if not v or v.isspace():
-            raise ValueError("Group name cannot be empty or only whitespace")
+        """Validate group name format and constraints.
         
-        # Check for invalid characters (example business rule)
-        invalid_chars = ['<', '>', '"', "'", '&', '%']
-        if any(char in v for char in invalid_chars):
-            raise ValueError(f"Group name contains invalid characters: {invalid_chars}")
+        Args:
+            v: The group name string to validate
+            
+        Returns:
+            str: Validated and normalized group name
+            
+        Raises:
+            ValueError: If group name is empty or contains invalid characters
+        """
+        if not v:
+            raise ValueError(GROUP_NAME_EMPTY_ERROR)
         
-        return v.strip()
-    
-    @field_validator('description')
-    @classmethod
-    def validate_description(cls, v: str) -> str:
-        """Validate group description."""
-        if not v or v.isspace():
-            raise ValueError("Description cannot be empty or only whitespace")
+        v = v.strip()
         
-        if len(v) > 500:
-            raise ValueError("Description cannot exceed 500 characters")
+        if len(v) == 0:
+            raise ValueError(GROUP_NAME_EMPTY_ERROR)
         
-        return v.strip()
+        if len(v) > 100:
+            raise ValueError(GROUP_NAME_LENGTH_ERROR)
+        
+        # Group names can contain letters, numbers, spaces, underscores, and hyphens
+        if not re.match(r'^[a-zA-Z0-9\s_-]+$', v):
+            raise ValueError(GROUP_NAME_FORMAT_ERROR)
+            
+        return v.strip()  # Return trimmed name
 
 
-class UserGroupUpdateModel(BaseUserGroupModel):
-    """Model for validating user group update data."""
+class UserGroupCreate(UserGroupBase):
+    """Pydantic model for creating a new user group.
     
-    group_name: Optional[Annotated[str, Field(min_length=2, max_length=100)]] = Field(
-        default=None, description="Group name (2-100 characters)"
+    Extends UserGroupBase with all required fields for group creation.
+    No additional fields needed as UserGroupBase contains all creation requirements.
+    """
+    pass
+
+
+class UserGroupUpdate(BaseModel):
+    """Pydantic model for updating an existing user group.
+    
+    All fields are optional to allow partial updates.
+    
+    Attributes:
+        group_name: Optional group name update
+        is_active: Optional active status update
+    """
+    
+    group_name: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        max_length=100,
+        description="Unique group name"
     )
-    description: Optional[str] = Field(default=None, description="Group description")
-    is_active: Optional[bool] = Field(default=None, description="Whether the group is active")
-    updated_by: Optional[str] = Field(default=None, description="User who updated the group")
+    is_active: Optional[bool] = Field(
+        default=None,
+        description="Group active status"
+    )
     
     @field_validator('group_name')
     @classmethod
     def validate_group_name(cls, v: Optional[str]) -> Optional[str]:
-        """Validate group name format and content."""
+        """Validate group name format for updates.
+        
+        Args:
+            v: The group name string to validate (can be None)
+            
+        Returns:
+            Optional[str]: Validated group name or None
+            
+        Raises:
+            ValueError: If group name is provided but invalid
+        """
         if v is not None:
-            if not v or v.isspace():
-                raise ValueError("Group name cannot be empty or only whitespace")
+            if not v:
+                raise ValueError(GROUP_NAME_EMPTY_ERROR)
             
-            # Check for invalid characters
-            invalid_chars = ['<', '>', '"', "'", '&', '%']
-            if any(char in v for char in invalid_chars):
-                raise ValueError(f"Group name contains invalid characters: {invalid_chars}")
+            v = v.strip()
             
+            if len(v) == 0:
+                raise ValueError(GROUP_NAME_EMPTY_ERROR)
+            
+            if len(v) > 100:
+                raise ValueError(GROUP_NAME_LENGTH_ERROR)
+            
+            if not re.match(r'^[a-zA-Z0-9\s_-]+$', v):
+                raise ValueError(GROUP_NAME_FORMAT_ERROR)
+                
             return v.strip()
         return v
+
+
+class UserGroupResponse(UserGroupBase):
+    """Pydantic model for user group response data.
     
-    @field_validator('description')
+    Used for API responses, includes all group data with timestamps and statistics.
+    
+    Attributes:
+        id: Group's unique identifier
+        created_on: Group creation timestamp
+        updated_on: Group last update timestamp
+        status: Human-readable status string
+        age_in_days: Number of days since creation
+        active_user_count: Number of active users in the group
+        Inherits all fields from UserGroupBase
+    """
+    
+    id: int = Field(..., description="Group's unique identifier")
+    created_on: Optional[datetime] = Field(
+        default=None,
+        description="Group creation timestamp"
+    )
+    updated_on: Optional[datetime] = Field(
+        default=None,
+        description="Group last update timestamp"
+    )
+    status: Optional[str] = Field(
+        default=None,
+        description="Human-readable status (Active/Inactive)"
+    )
+    age_in_days: Optional[int] = Field(
+        default=None,
+        description="Number of days since group creation"
+    )
+    active_user_count: Optional[int] = Field(
+        default=None,
+        description="Number of active users in the group"
+    )
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UserGroupMapperBase(BaseModel):
+    """Base Pydantic model for UserGroupMapper with common fields.
+    
+    This model contains the common fields and validations for user-group mappings.
+    
+    Attributes:
+        group_id: Foreign key reference to UserGroups.id
+        user_id: Foreign key reference to User.id
+        is_active: Boolean flag for mapping status (default: True)
+    """
+    
+    group_id: int = Field(
+        ...,
+        gt=0,
+        description="Group ID (positive integer)"
+    )
+    user_id: int = Field(
+        ...,
+        gt=0,
+        description="User ID (positive integer)"
+    )
+    is_active: bool = Field(
+        default=True,
+        description="Mapping active status"
+    )
+
+    @field_validator('group_id')
     @classmethod
-    def validate_description(cls, v: Optional[str]) -> Optional[str]:
-        """Validate group description."""
-        if v is not None:
-            if not v or v.isspace():
-                raise ValueError("Description cannot be empty or only whitespace")
+    def validate_group_id(cls, v: int) -> int:
+        """Validate group ID.
+        
+        Args:
+            v: The group ID to validate
             
-            if len(v) > 500:
-                raise ValueError("Description cannot exceed 500 characters")
+        Returns:
+            int: Validated group ID
             
-            return v.strip()
+        Raises:
+            ValueError: If group ID is not a positive integer
+        """
+        if not isinstance(v, int) or v <= 0:
+            raise ValueError(GROUP_ID_INVALID_ERROR)
         return v
-    
-    @model_validator(mode='after')
-    def validate_at_least_one_field(self) -> 'UserGroupUpdateModel':
-        """Ensure at least one field is provided for update."""
-        if not any([self.group_name, self.description, self.is_active is not None, self.updated_by]):
-            raise ValueError("At least one field must be provided for update")
-        return self
 
-
-class UserGroupFiltersModel(BaseUserGroupModel):
-    """Model for validating user group search/filter parameters."""
-    
-    group_name: Optional[str] = Field(default=None, description="Filter by group name (partial match)")
-    description: Optional[str] = Field(default=None, description="Filter by description (partial match)")
-    is_active: Optional[bool] = Field(default=None, description="Filter by active status")
-    created_by: Optional[str] = Field(default=None, description="Filter by creator")
-    created_after: Optional[datetime] = Field(default=None, description="Filter by creation date (after this date)")
-    created_before: Optional[datetime] = Field(default=None, description="Filter by creation date (before this date)")
-    
-    @model_validator(mode='after')
-    def validate_date_range(self) -> 'UserGroupFiltersModel':
-        """Validate that created_after is before created_before."""
-        if self.created_after and self.created_before and self.created_after >= self.created_before:
-            raise ValueError("created_after must be before created_before")
-        return self
-
-
-class PaginationModel(BaseUserGroupModel):
-    """Model for validating pagination parameters."""
-    
-    limit: Optional[Annotated[int, Field(ge=1, le=1000)]] = Field(
-        default=None, description="Maximum number of records to return (1-1000)"
-    )
-    offset: Annotated[int, Field(ge=0)] = Field(default=0, description="Number of records to skip")
-
-
-class SearchModel(BaseUserGroupModel):
-    """Model for validating search parameters."""
-    
-    search_term: Annotated[str, Field(min_length=1)] = Field(..., description="Search term (minimum 1 character)")
-    search_fields: List[str] = Field(
-        default=['group_name', 'description'], 
-        description="Fields to search in"
-    )
-    limit: Annotated[int, Field(ge=1, le=1000)] = Field(default=50, description="Maximum number of results (1-1000)")
-    
-    @field_validator('search_fields')
+    @field_validator('user_id')
     @classmethod
-    def validate_search_fields(cls, v: List[str]) -> List[str]:
-        """Validate search fields are allowed."""
-        allowed_fields = {'group_name', 'description', 'created_by'}
-        invalid_fields = set(v) - allowed_fields
+    def validate_user_id(cls, v: int) -> int:
+        """Validate user ID.
         
-        if invalid_fields:
-            raise ValueError(
-                f"Invalid search fields: {invalid_fields}. "
-                f"Allowed fields: {allowed_fields}"
-            )
+        Args:
+            v: The user ID to validate
+            
+        Returns:
+            int: Validated user ID
+            
+        Raises:
+            ValueError: If user ID is not a positive integer
+        """
+        if not isinstance(v, int) or v <= 0:
+            raise ValueError(USER_ID_INVALID_ERROR)
+        return v
+
+
+class UserGroupMapperCreate(UserGroupMapperBase):
+    """Pydantic model for creating a new user-group mapping.
+    
+    Extends UserGroupMapperBase with all required fields for mapping creation.
+    """
+    pass
+
+
+class UserGroupMapperUpdate(BaseModel):
+    """Pydantic model for updating an existing user-group mapping.
+    
+    All fields are optional to allow partial updates.
+    
+    Attributes:
+        group_id: Optional group ID update
+        user_id: Optional user ID update
+        is_active: Optional active status update
+    """
+    
+    group_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Group ID (positive integer)"
+    )
+    user_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="User ID (positive integer)"
+    )
+    is_active: Optional[bool] = Field(
+        default=None,
+        description="Mapping active status"
+    )
+    
+    @field_validator('group_id')
+    @classmethod
+    def validate_group_id(cls, v: Optional[int]) -> Optional[int]:
+        """Validate group ID for updates.
         
+        Args:
+            v: The group ID to validate (can be None)
+            
+        Returns:
+            Optional[int]: Validated group ID or None
+            
+        Raises:
+            ValueError: If group ID is provided but invalid
+        """
+        if v is not None and (not isinstance(v, int) or v <= 0):
+            raise ValueError(GROUP_ID_INVALID_ERROR)
+        return v
+
+    @field_validator('user_id')
+    @classmethod
+    def validate_user_id(cls, v: Optional[int]) -> Optional[int]:
+        """Validate user ID for updates.
+        
+        Args:
+            v: The user ID to validate (can be None)
+            
+        Returns:
+            Optional[int]: Validated user ID or None
+            
+        Raises:
+            ValueError: If user ID is provided but invalid
+        """
+        if v is not None and (not isinstance(v, int) or v <= 0):
+            raise ValueError(USER_ID_INVALID_ERROR)
+        return v
+
+
+class UserGroupMapperResponse(UserGroupMapperBase):
+    """Pydantic model for user-group mapping response data.
+    
+    Used for API responses, includes all mapping data with timestamps.
+    
+    Attributes:
+        id: Mapping's unique identifier
+        created_on: Mapping creation timestamp
+        status: Human-readable status string
+        Inherits all fields from UserGroupMapperBase
+    """
+    
+    id: int = Field(..., description="Mapping's unique identifier")
+    created_on: Optional[datetime] = Field(
+        default=None,
+        description="Mapping creation timestamp"
+    )
+    status: Optional[str] = Field(
+        default=None,
+        description="Human-readable status (Active/Inactive)"
+    )
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UserGroupSearch(BaseModel):
+    """Pydantic model for user group search operations.
+    
+    Used for filtering and searching user groups with various criteria.
+    
+    Attributes:
+        group_name: Optional name filter (partial match)
+        is_active: Optional active status filter
+        created_after: Optional filter for groups created after this date
+        created_before: Optional filter for groups created before this date
+        has_users: Optional filter for groups with/without users
+        min_user_count: Optional minimum user count filter
+        max_user_count: Optional maximum user count filter
+        limit: Maximum number of results to return
+        offset: Number of results to skip (for pagination)
+    """
+    
+    group_name: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Filter by group name (partial match)"
+    )
+    is_active: Optional[bool] = Field(
+        default=None,
+        description="Filter by active status"
+    )
+    created_after: Optional[datetime] = Field(
+        default=None,
+        description="Filter groups created after this date"
+    )
+    created_before: Optional[datetime] = Field(
+        default=None,
+        description="Filter groups created before this date"
+    )
+    has_users: Optional[bool] = Field(
+        default=None,
+        description="Filter groups with (True) or without (False) users"
+    )
+    min_user_count: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Minimum number of users in group"
+    )
+    max_user_count: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Maximum number of users in group"
+    )
+    limit: Optional[int] = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Maximum number of results (1-1000)"
+    )
+    offset: Optional[int] = Field(
+        default=0,
+        ge=0,
+        description="Number of results to skip"
+    )
+
+
+class BulkUserGroupOperation(BaseModel):
+    """Pydantic model for bulk user-group operations.
+    
+    Used for adding/removing multiple users to/from groups efficiently.
+    
+    Attributes:
+        group_id: Target group ID
+        user_ids: List of user IDs to operate on
+        operation: Type of operation ('add' or 'remove')
+        is_active: Status for new mappings (only used for 'add' operations)
+    """
+    
+    group_id: int = Field(
+        ...,
+        gt=0,
+        description="Target group ID"
+    )
+    user_ids: List[int] = Field(
+        ...,
+        min_length=1,
+        description="List of user IDs (at least 1 required)"
+    )
+    operation: str = Field(
+        ...,
+        description="Operation type: 'add' or 'remove'"
+    )
+    is_active: bool = Field(
+        default=True,
+        description="Status for new mappings (add operations only)"
+    )
+
+    @field_validator('operation')
+    @classmethod
+    def validate_operation(cls, v: str) -> str:
+        """Validate operation type.
+        
+        Args:
+            v: The operation string to validate
+            
+        Returns:
+            str: Validated operation (lowercase)
+            
+        Raises:
+            ValueError: If operation is not 'add' or 'remove'
+        """
+        v = v.lower().strip()
+        if v not in ['add', 'remove']:
+            raise ValueError("Operation must be 'add' or 'remove'")
+        return v
+
+    @field_validator('user_ids')
+    @classmethod
+    def validate_user_ids(cls, v: List[int]) -> List[int]:
+        """Validate user IDs list.
+        
+        Args:
+            v: The list of user IDs to validate
+            
+        Returns:
+            List[int]: Validated list of unique user IDs
+            
+        Raises:
+            ValueError: If any user ID is invalid or list is empty
+        """
         if not v:
-            raise ValueError("At least one search field must be specified")
+            raise ValueError("At least one user ID is required")
         
-        return v
-
-
-# ============================================================================
-# User Group Mapper Models
-# ============================================================================
-
-class UserGroupMappingCreateModel(BaseUserGroupModel):
-    """Model for validating user-group mapping creation data."""
-    
-    user_id: Annotated[int, Field(gt=0)] = Field(..., description="User ID (must be positive integer)")
-    group_id: Annotated[int, Field(gt=0)] = Field(..., description="Group ID (must be positive integer)")
-    is_active: bool = Field(default=True, description="Whether the mapping is active")
-    created_by: Optional[str] = Field(default=None, description="User who created the mapping")
-    notes: Optional[Annotated[str, Field(max_length=500)]] = Field(
-        default=None, description="Optional notes about the mapping"
-    )
-
-
-class UserGroupMappingUpdateModel(BaseUserGroupModel):
-    """Model for validating user-group mapping update data."""
-    
-    is_active: Optional[bool] = Field(default=None, description="Whether the mapping is active")
-    updated_by: Optional[str] = Field(default=None, description="User who updated the mapping")
-    notes: Optional[Annotated[str, Field(max_length=500)]] = Field(
-        default=None, description="Optional notes about the mapping"
-    )
-    
-    @model_validator(mode='after')
-    def validate_at_least_one_field(self) -> 'UserGroupMappingUpdateModel':
-        """Ensure at least one field is provided for update."""
-        if not any([self.is_active is not None, self.updated_by, self.notes]):
-            raise ValueError("At least one field must be provided for update")
-        return self
-
-
-class UserGroupMappingFiltersModel(BaseUserGroupModel):
-    """Model for validating user-group mapping filter parameters."""
-    
-    user_id: Optional[Annotated[int, Field(gt=0)]] = Field(default=None, description="Filter by user ID")
-    group_id: Optional[Annotated[int, Field(gt=0)]] = Field(default=None, description="Filter by group ID")
-    is_active: Optional[bool] = Field(default=None, description="Filter by active status")
-    created_by: Optional[str] = Field(default=None, description="Filter by creator")
-    updated_by: Optional[str] = Field(default=None, description="Filter by last updater")
-    created_after: Optional[datetime] = Field(default=None, description="Filter by creation date (after this date)")
-    created_before: Optional[datetime] = Field(default=None, description="Filter by creation date (before this date)")
-    
-    @model_validator(mode='after')
-    def validate_date_range(self) -> 'UserGroupMappingFiltersModel':
-        """Validate that created_after is before created_before."""
-        if self.created_after and self.created_before and self.created_after >= self.created_before:
-            raise ValueError("created_after must be before created_before")
-        return self
-
-
-class BulkMappingCreateModel(BaseUserGroupModel):
-    """Model for validating bulk user-group mapping creation."""
-    
-    mappings: Annotated[List[UserGroupMappingCreateModel], Field(min_length=1, max_length=1000)] = Field(
-        ..., description="List of mappings to create (1-1000 items)"
-    )
-    
-    @field_validator('mappings')
-    @classmethod
-    def validate_unique_mappings(cls, v: List[UserGroupMappingCreateModel]) -> List[UserGroupMappingCreateModel]:
-        """Ensure no duplicate user-group combinations."""
-        seen_combinations = set()
-        duplicates = []
+        # Validate each user ID
+        for user_id in v:
+            if not isinstance(user_id, int) or user_id <= 0:
+                raise ValueError(f"Invalid user ID: {user_id}. Must be a positive integer.")
         
-        for i, mapping in enumerate(v):
-            combination = (mapping.user_id, mapping.group_id)
-            if combination in seen_combinations:
-                duplicates.append(f"Position {i}: User {mapping.user_id} -> Group {mapping.group_id}")
-            else:
-                seen_combinations.add(combination)
-        
-        if duplicates:
-            raise ValueError(f"Duplicate user-group combinations found: {duplicates}")
-        
-        return v
+        # Remove duplicates while preserving order
+        unique_ids = list(dict.fromkeys(v))
+        return unique_ids
 
 
-class BulkMappingUpdateModel(BaseUserGroupModel):
-    """Model for validating bulk user-group mapping updates."""
-    
-    mapping_id: Annotated[int, Field(gt=0)] = Field(..., description="Mapping ID to update")
-    data: UserGroupMappingUpdateModel = Field(..., description="Update data for the mapping")
-
-
-class BulkMappingUpdatesModel(BaseUserGroupModel):
-    """Model for validating bulk user-group mapping updates."""
-    
-    updates: Annotated[List[BulkMappingUpdateModel], Field(min_length=1, max_length=100)] = Field(
-        ..., description="List of mapping updates (1-100 items)"
-    )
-    
-    @field_validator('updates')
-    @classmethod
-    def validate_unique_mapping_ids(cls, v: List[BulkMappingUpdateModel]) -> List[BulkMappingUpdateModel]:
-        """Ensure no duplicate mapping IDs."""
-        seen_ids = set()
-        duplicates = []
-        
-        for i, update in enumerate(v):
-            mapping_id = update.mapping_id
-            if mapping_id in seen_ids:
-                duplicates.append(f"Position {i}: Mapping ID {mapping_id}")
-            else:
-                seen_ids.add(mapping_id)
-        
-        if duplicates:
-            raise ValueError(f"Duplicate mapping IDs found: {duplicates}")
-        
-        return v
-
-
-# ============================================================================
-# Utility Models
-# ============================================================================
-
-class UserGroupActivationModel(BaseUserGroupModel):
-    """Model for user-group activation/deactivation operations."""
-    
-    user_id: Annotated[int, Field(gt=0)] = Field(..., description="User ID (must be positive integer)")
-    group_id: Annotated[int, Field(gt=0)] = Field(..., description="Group ID (must be positive integer)")
-
-
-# ============================================================================
-# Validation Helper Functions
-# ============================================================================
-
-def validate_group_create_data(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Validate user group creation data using Pydantic.
+def validate_group_id(group_id: any) -> int:
+    """Validate and convert group ID to integer.
     
     Args:
-        data: Raw group creation data
+        group_id: The group ID to validate (can be int, str, etc.)
         
     Returns:
-        Dict[str, Any]: Validated and processed data
+        int: Validated group ID
         
     Raises:
-        UserGroupValidationError: If validation fails
+        ValueError: If group ID is invalid
     """
     try:
-        model = UserGroupCreateModel(**data)
-        return model.model_dump(exclude_none=True)
-    except PydanticValidationError as e:
-        error_messages = []
-        for error in e.errors():
-            field = " -> ".join(str(x) for x in error['loc'])
-            msg = error['msg']
-            error_messages.append(f"{field}: {msg}")
-        
-        raise UserGroupValidationError(
-            f"Group creation validation failed: {'; '.join(error_messages)}"
-        )
+        group_id = int(group_id)
+        if group_id <= 0:
+            raise ValueError("Group ID must be a positive integer")
+        return group_id
+    except (ValueError, TypeError):
+        raise ValueError("Group ID must be a valid positive integer")
 
 
-def validate_group_update_data(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Validate user group update data using Pydantic.
+def validate_user_id(user_id: any) -> int:
+    """Validate and convert user ID to integer.
     
     Args:
-        data: Raw group update data
+        user_id: The user ID to validate (can be int, str, etc.)
         
     Returns:
-        Dict[str, Any]: Validated and processed data
+        int: Validated user ID
         
     Raises:
-        UserGroupValidationError: If validation fails
+        ValueError: If user ID is invalid
     """
     try:
-        model = UserGroupUpdateModel(**data)
-        return model.model_dump(exclude_none=True)
-    except PydanticValidationError as e:
-        error_messages = []
-        for error in e.errors():
-            field = " -> ".join(str(x) for x in error['loc'])
-            msg = error['msg']
-            error_messages.append(f"{field}: {msg}")
-        
-        raise UserGroupValidationError(
-            f"Group update validation failed: {'; '.join(error_messages)}"
-        )
-
-
-def validate_group_filters(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Validate user group filter parameters using Pydantic.
-    
-    Args:
-        data: Raw filter data
-        
-    Returns:
-        Dict[str, Any]: Validated and processed filters
-        
-    Raises:
-        UserGroupValidationError: If validation fails
-    """
-    try:
-        model = UserGroupFiltersModel(**data)
-        return model.model_dump(exclude_none=True)
-    except PydanticValidationError as e:
-        error_messages = []
-        for error in e.errors():
-            field = " -> ".join(str(x) for x in error['loc'])
-            msg = error['msg']
-            error_messages.append(f"{field}: {msg}")
-        
-        raise UserGroupValidationError(
-            f"Filter validation failed: {'; '.join(error_messages)}"
-        )
-
-
-def validate_pagination_params(limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any]:
-    """Validate pagination parameters using Pydantic.
-    
-    Args:
-        limit: Maximum number of records
-        offset: Number of records to skip
-        
-    Returns:
-        Dict[str, Any]: Validated pagination parameters
-        
-    Raises:
-        UserGroupValidationError: If validation fails
-    """
-    try:
-        model = PaginationModel(limit=limit, offset=offset)
-        return model.model_dump(exclude_none=True)
-    except PydanticValidationError as e:
-        error_messages = []
-        for error in e.errors():
-            field = " -> ".join(str(x) for x in error['loc'])
-            msg = error['msg']
-            error_messages.append(f"{field}: {msg}")
-        
-        raise UserGroupValidationError(
-            f"Pagination validation failed: {'; '.join(error_messages)}"
-        )
-
-
-def validate_search_params(search_term: str, search_fields: List[str], limit: int) -> Dict[str, Any]:
-    """Validate search parameters using Pydantic.
-    
-    Args:
-        search_term: Search term
-        search_fields: Fields to search in
-        limit: Maximum number of results
-        
-    Returns:
-        Dict[str, Any]: Validated search parameters
-        
-    Raises:
-        UserGroupValidationError: If validation fails
-    """
-    try:
-        model = SearchModel(
-            search_term=search_term,
-            search_fields=search_fields,
-            limit=limit
-        )
-        return model.model_dump()
-    except PydanticValidationError as e:
-        error_messages = []
-        for error in e.errors():
-            field = " -> ".join(str(x) for x in error['loc'])
-            msg = error['msg']
-            error_messages.append(f"{field}: {msg}")
-        
-        raise UserGroupValidationError(
-            f"Search validation failed: {'; '.join(error_messages)}"
-        )
-
-
-def validate_mapping_create_data(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Validate user-group mapping creation data using Pydantic.
-    
-    Args:
-        data: Raw mapping creation data
-        
-    Returns:
-        Dict[str, Any]: Validated and processed data
-        
-    Raises:
-        UserGroupValidationError: If validation fails
-    """
-    try:
-        model = UserGroupMappingCreateModel(**data)
-        return model.model_dump(exclude_none=True)
-    except PydanticValidationError as e:
-        error_messages = []
-        for error in e.errors():
-            field = " -> ".join(str(x) for x in error['loc'])
-            msg = error['msg']
-            error_messages.append(f"{field}: {msg}")
-        
-        raise UserGroupValidationError(
-            f"Mapping creation validation failed: {'; '.join(error_messages)}"
-        )
-
-
-def validate_mapping_update_data(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Validate user-group mapping update data using Pydantic.
-    
-    Args:
-        data: Raw mapping update data
-        
-    Returns:
-        Dict[str, Any]: Validated and processed data
-        
-    Raises:
-        UserGroupValidationError: If validation fails
-    """
-    try:
-        model = UserGroupMappingUpdateModel(**data)
-        return model.model_dump(exclude_none=True)
-    except PydanticValidationError as e:
-        error_messages = []
-        for error in e.errors():
-            field = " -> ".join(str(x) for x in error['loc'])
-            msg = error['msg']
-            error_messages.append(f"{field}: {msg}")
-        
-        raise UserGroupValidationError(
-            f"Mapping update validation failed: {'; '.join(error_messages)}"
-        )
-
-
-def validate_mapping_filters(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Validate user-group mapping filter parameters using Pydantic.
-    
-    Args:
-        data: Raw filter data
-        
-    Returns:
-        Dict[str, Any]: Validated and processed filters
-        
-    Raises:
-        UserGroupValidationError: If validation fails
-    """
-    try:
-        model = UserGroupMappingFiltersModel(**data)
-        return model.model_dump(exclude_none=True)
-    except PydanticValidationError as e:
-        error_messages = []
-        for error in e.errors():
-            field = " -> ".join(str(x) for x in error['loc'])
-            msg = error['msg']
-            error_messages.append(f"{field}: {msg}")
-        
-        raise UserGroupValidationError(
-            f"Mapping filter validation failed: {'; '.join(error_messages)}"
-        )
-
-
-def validate_bulk_mapping_create_data(data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Validate bulk user-group mapping creation data using Pydantic.
-    
-    Args:
-        data: List of raw mapping creation data
-        
-    Returns:
-        List[Dict[str, Any]]: Validated and processed data
-        
-    Raises:
-        UserGroupValidationError: If validation fails
-    """
-    try:
-        model = BulkMappingCreateModel(mappings=data)
-        return [mapping.model_dump(exclude_none=True) for mapping in model.mappings]
-    except PydanticValidationError as e:
-        error_messages = []
-        for error in e.errors():
-            field = " -> ".join(str(x) for x in error['loc'])
-            msg = error['msg']
-            error_messages.append(f"{field}: {msg}")
-        
-        raise UserGroupValidationError(
-            f"Bulk mapping creation validation failed: {'; '.join(error_messages)}"
-        )
-
-
-def validate_bulk_mapping_update_data(data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Validate bulk user-group mapping update data using Pydantic.
-    
-    Args:
-        data: List of raw mapping update data
-        
-    Returns:
-        List[Dict[str, Any]]: Validated and processed data
-        
-    Raises:
-        UserGroupValidationError: If validation fails
-    """
-    try:
-        model = BulkMappingUpdatesModel(updates=data)
-        return [
-            {
-                'mapping_id': update.mapping_id,
-                'data': update.data.model_dump(exclude_none=True)
-            }
-            for update in model.updates
-        ]
-    except PydanticValidationError as e:
-        error_messages = []
-        for error in e.errors():
-            field = " -> ".join(str(x) for x in error['loc'])
-            msg = error['msg']
-            error_messages.append(f"{field}: {msg}")
-        
-        raise UserGroupValidationError(
-            f"Bulk mapping update validation failed: {'; '.join(error_messages)}"
-        )
-
-
-def validate_user_group_activation(user_id: Any, group_id: Any) -> Dict[str, Any]:
-    """Validate user-group activation/deactivation parameters using Pydantic.
-    
-    Args:
-        user_id: User ID
-        group_id: Group ID
-        
-    Returns:
-        Dict[str, Any]: Validated parameters
-        
-    Raises:
-        UserGroupValidationError: If validation fails
-    """
-    try:
-        model = UserGroupActivationModel(user_id=user_id, group_id=group_id)
-        return model.model_dump()
-    except PydanticValidationError as e:
-        error_messages = []
-        for error in e.errors():
-            field = " -> ".join(str(x) for x in error['loc'])
-            msg = error['msg']
-            error_messages.append(f"{field}: {msg}")
-        
-        raise UserGroupValidationError(
-            f"User-group activation validation failed: {'; '.join(error_messages)}"
-        )
-
-
-def validate_positive_integer(value: Any, field_name: str = "ID") -> int:
-    """Validate that a value is a positive integer.
-    
-    Args:
-        value: Value to validate
-        field_name: Name of the field for error messages
-        
-    Returns:
-        int: Validated positive integer
-        
-    Raises:
-        UserGroupValidationError: If validation fails
-    """
-    return PositiveInt.validate_id(value, field_name)
+        user_id = int(user_id)
+        if user_id <= 0:
+            raise ValueError("User ID must be a positive integer")
+        return user_id
+    except (ValueError, TypeError):
+        raise ValueError("User ID must be a valid positive integer")
