@@ -9,7 +9,7 @@ class DatabaseFunctionError(Exception):
     """Base exception for database function operations."""
     pass
 
-
+# User Group sManagement Exceptions
 class UserGroupManagementError(DatabaseFunctionError):
     """Raised when user group management operations fail."""
     pass
