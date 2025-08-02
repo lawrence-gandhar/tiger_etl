@@ -32,3 +32,5 @@ coverage.xml
 build/
 dist/
 *.egg-
+
+versions/
