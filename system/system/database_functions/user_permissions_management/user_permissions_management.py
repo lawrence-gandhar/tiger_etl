@@ -57,7 +57,7 @@ from system.system.database_functions.exceptions import (
     UserPermissionUpdateError,
     UserPermissionAlreadyExistsError,
 )
-from system.system.models.user_permissions_management.validations import (
+from system.system.database_functions.user_permissions_management.validations import (
     UserPermissionsCreate as UserPermissionCreate,
     UserPermissionsUpdate as UserPermissionUpdate,
 )
