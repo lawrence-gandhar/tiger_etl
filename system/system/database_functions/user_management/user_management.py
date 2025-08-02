@@ -46,7 +46,7 @@ from system.system.database_functions.exceptions import (
     UserDeleteError,
     UserAlreadyExistsException,
 )
-from system.system.database_functions.user_management.constants import USER_ALREADY_EXISTS, USER_NOT_FOUND, USERS_TABLE
+from system.system.database_functions.user_management.user_management_constants import USER_ALREADY_EXISTS, USER_NOT_FOUND, USERS_TABLE
 from system.system.database_functions.user_management.validations import UserCreate, UserUpdate, validate_user_id
 
 

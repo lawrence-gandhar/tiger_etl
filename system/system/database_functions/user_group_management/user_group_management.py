@@ -65,7 +65,7 @@ from system.system.database_functions.user_group_management.validations import (
     validate_user_group_activation,
     validate_positive_integer,
 )
-from system.system.constants.model_constants.user_group_management_constants import (
+from system.system.database_functions.user_group_management.user_group_management_constants import (
     USER_GROUPS_TABLE,
     USER_GROUP_MAPPER_TABLE,
     MAPPING_ID_POSITIVE_ERROR,

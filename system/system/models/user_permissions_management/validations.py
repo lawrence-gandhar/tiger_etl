@@ -8,7 +8,7 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 try:
-    from system.system.constants.model_constants.user_permissions_management_constants import (
+    from system.system.database_functions.user_permissions_management.user_permissions_management_constants import (
         VALID_PERMISSION_TYPES,
         PERMISSION_TYPE_ERROR,
         USER_ID_ERROR,
