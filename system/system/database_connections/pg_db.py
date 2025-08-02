@@ -2,13 +2,15 @@
 PostgreSQL persistent connection and base CRUD class for the ETL tool.
 
 Implements SQLAlchemy and custom exceptions from exceptions.py.
+Features a singleton pattern for shared persistent connections across all database functions.
 """
 
-from sqlalchemy import create_engine, Table, MetaData, select, insert, update, delete, text, Column, Integer, String, Boolean, DateTime, Float, Text, BigInteger
+from sqlalchemy import create_engine, Table, MetaData, select, insert, update, delete, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.engine import Engine
-from typing import Optional, Dict, Any, List, Union
-import re
+from typing import Optional, Dict, Any, List
+import threading
+import logging
 
 from system.system.database_connections.exceptions import (
     SQLAlchemyConnectionError,
@@ -16,20 +18,27 @@ from system.system.database_connections.exceptions import (
     SQLAlchemyReadError,
     SQLAlchemyUpdateError,
     SQLAlchemyDeleteError,
-    SQLAlchemyTableCreationError,
-    SQLAlchemyTableValidationError,
-    SQLAlchemyTableExistsError
 )
 from system.system.default_configs.postgres_db_conf import POSTGRES_URL
+
+# Set up logging
+logger = logging.getLogger(__name__)
+
 
 class PostgresDB:
     """
     Handles persistent PostgreSQL connection and provides basic CRUD operations using SQLAlchemy.
+    
+    This class implements a singleton pattern to ensure a single shared database connection
+    across all database functions in the system. The connection is thread-safe and persistent,
+    reducing connection overhead and improving performance.
 
-    This class provides a simple interface for common database operations including
-    create, read, update, delete, and table truncation operations. All write operations
-    (create, update, delete, truncate) are wrapped in transactions with automatic rollback
-    on failure to ensure data consistency.
+    Singleton Features:
+        - Single shared database connection across the entire application
+        - Thread-safe initialization and access
+        - Automatic connection recovery on failures
+        - Shared connection pool for optimal resource usage
+        - Lazy initialization - connection created only when first accessed
 
     Transaction Support:
         - All write operations use SQLAlchemy's begin() context manager
@@ -38,14 +47,18 @@ class PostgresDB:
         - Bulk operations supported with transactional safety
 
     Examples:
-        >>> # Initialize database connection
+        >>> # Get the singleton instance (creates connection on first call)
         >>> db = PostgresDB()
+        >>> 
+        >>> # All subsequent calls return the same instance
+        >>> db2 = PostgresDB()
+        >>> assert db is db2  # Same instance
         >>> 
         >>> # Create a new user (transactional)
         >>> user_data = {'username': 'john', 'email': 'john@example.com'}
         >>> new_user = db.create('users', user_data)
         >>> 
-        >>> # Read users (no transaction needed)
+        >>> # Read users (uses shared connection)
         >>> all_users = db.read('users')
         >>> active_users = db.read('users', {'is_active': True})
         >>> 
@@ -55,39 +68,143 @@ class PostgresDB:
         >>> # Delete user (transactional)
         >>> deleted = db.delete('users', {'id': 1})
         >>> 
-        >>> # Bulk operations (transactional)
-        >>> users_data = [{'username': f'user{i}'} for i in range(3)]
-        >>> created_users = db.bulk_create('users', users_data)
-        >>> 
-        >>> # Custom transaction
-        >>> def my_operations(conn):
-        ...     # Your custom database operations here
-        ...     return conn.execute("SELECT COUNT(*) FROM users").fetchone()
-        >>> results = db.execute_transaction([my_operations])
-        >>> 
-        >>> # Truncate table and reset auto-increment (transactional)
-        >>> db.truncate_and_reset_identity('users')
-        >>> 
-        >>> # Always close the connection when done
-        >>> db.close()
-        >>> 
-        >>> # Or use as context manager (recommended)
+        >>> # Connection is automatically managed - no need to close manually
+        >>> # But you can still use as context manager if needed
         >>> with PostgresDB() as db:
         ...     users = db.read('users')
     """
 
+    _instance = None
+    _lock = threading.Lock()
+    _engine = None
+    _metadata = None
+    _connection_initialized = False
+
+    def __new__(cls):
+        """
+        Implement singleton pattern with thread-safe initialization.
+        
+        Returns:
+            PostgresDB: The singleton instance
+        """
+        if cls._instance is None:
+            with cls._lock:
+                # Double-check locking pattern
+                if cls._instance is None:
+                    cls._instance = super(PostgresDB, cls).__new__(cls)
+        return cls._instance
+
     def __init__(self) -> None:
         """
-        Initialize the SQLAlchemy engine using POSTGRES_URL from postgres_db_conf.py.
+        Initialize the singleton PostgresDB instance with persistent connection.
+        
+        This method is called every time PostgresDB() is instantiated, but the actual
+        initialization only happens once due to the singleton pattern.
+        """
+        if not self._connection_initialized:
+            with self._lock:
+                # Double-check locking for initialization
+                if not self._connection_initialized:
+                    self._initialize_connection()
+                    self._connection_initialized = True
+
+    def _initialize_connection(self) -> None:
+        """
+        Initialize the SQLAlchemy engine with persistent connection settings.
+        
+        This method sets up the database engine with optimized settings for
+        persistent connections including connection pooling and error handling.
         """
         try:
-            self.engine: Engine = create_engine(POSTGRES_URL)
-            self.metadata = MetaData()
-            # Test connection
-            with self.engine.connect() as conn:
-                pass
+            logger.info("Initializing PostgresDB singleton with persistent connection")
+            
+            # Create engine with persistent connection settings
+            self._engine: Engine = create_engine(
+                POSTGRES_URL,
+                # Connection pool settings for persistent connections
+                pool_size=20,           # Number of connections to maintain in pool
+                max_overflow=30,        # Additional connections beyond pool_size
+                pool_timeout=30,        # Timeout for getting connection from pool
+                pool_recycle=3600,      # Recycle connections after 1 hour
+                pool_pre_ping=True,     # Validate connections before use
+                # Performance settings
+                echo=False,             # Set to True for SQL logging in development
+                connect_args={
+                    "connect_timeout": 10,
+                    "application_name": "tiger_etl_persistent"
+                }
+            )
+            
+            self._metadata = MetaData()
+            
+            # Test the connection
+            with self._engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+                logger.info("PostgresDB singleton connection established successfully")
+                
         except SQLAlchemyError as e:
+            logger.error(f"Failed to initialize PostgresDB singleton: {e}")
             raise SQLAlchemyConnectionError(f"Failed to connect to database: {e}") from e
+
+    @property
+    def engine(self) -> Engine:
+        """
+        Get the SQLAlchemy engine instance.
+        
+        Returns:
+            Engine: The SQLAlchemy engine instance
+        """
+        if self._engine is None:
+            self._initialize_connection()
+        return self._engine
+
+    @property
+    def metadata(self) -> MetaData:
+        """
+        Get the SQLAlchemy metadata instance.
+        
+        Returns:
+            MetaData: The SQLAlchemy metadata instance
+        """
+        if self._metadata is None:
+            self._initialize_connection()
+        return self._metadata
+
+    def get_connection_info(self) -> Dict[str, Any]:
+        """
+        Get information about the current database connection.
+        
+        Returns:
+            Dict[str, Any]: Connection information including pool status
+        """
+        if self._engine is None:
+            return {"status": "not_initialized"}
+        
+        pool = self._engine.pool
+        return {
+            "status": "connected",
+            "pool_size": pool.size(),
+            "checked_in_connections": pool.checkedin(),
+            "checked_out_connections": pool.checkedout(),
+            "overflow_connections": pool.overflow(),
+            "invalid_connections": pool.invalid(),
+            "url": str(self._engine.url).replace(self._engine.url.password, "***") if self._engine.url.password else str(self._engine.url)
+        }
+
+    def test_connection(self) -> bool:
+        """
+        Test if the database connection is working.
+        
+        Returns:
+            bool: True if connection is working, False otherwise
+        """
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Connection test failed: {e}")
+            return False
 
     def create(self, table_name: str, data: Dict[str, Any]) -> Optional[Any]:
         """
@@ -124,9 +241,9 @@ class PostgresDB:
             # Transaction automatically rolled back by the context manager
             raise SQLAlchemyInsertError(f"Insert failed: {e}")
 
-    def read(self, table_name: str, conditions: Optional[Dict[str, Any]] = None, join: int = 0) -> List[Any]:
+    def read(self, table_name: str, conditions: Optional[Dict[str, Any]] = None, join: int = 0, limit: Optional[int] = None, offset: int = 0) -> List[Any]:
         """
-        Read records from the specified table with optional conditions and join control.
+        Read records from the specified table with optional conditions, join control, and pagination.
 
         Args:
             table_name (str): Table name.
@@ -135,6 +252,8 @@ class PostgresDB:
                 - 0 (default): No joins, return only the specified table data
                 - 1: Forward joins (fetch related data from referenced tables)
                 - -1: Backward joins (fetch data that references this table)
+            limit (int, optional): Maximum number of records to return.
+            offset (int, optional): Number of records to skip (for pagination).
 
         Returns:
             List[Any]: List of records.
@@ -146,6 +265,9 @@ class PostgresDB:
             >>> 
             >>> # Get active users only (no joins)
             >>> active_users = db.read('users', {'is_active': True})
+            >>> 
+            >>> # Get users with pagination
+            >>> paginated_users = db.read('users', limit=10, offset=20)
             >>> 
             >>> # Get users with forward joins (e.g., fetch user's profile data)
             >>> users_with_profiles = db.read('users', {'is_active': True}, join=1)
@@ -168,6 +290,12 @@ class PostgresDB:
             if conditions:
                 for key, value in conditions.items():
                     stmt = stmt.where(table.c[key] == value)
+            
+            # Apply pagination if specified
+            if limit is not None:
+                stmt = stmt.limit(limit)
+            if offset > 0:
+                stmt = stmt.offset(offset)
             
             # Note: Join implementation is controlled by the join parameter
             # Currently only supports join=0 (no joins)
@@ -226,7 +354,7 @@ class PostgresDB:
             # Transaction automatically rolled back by the context manager
             raise SQLAlchemyUpdateError(f"Update failed: {e}")
 
-    def delete(self, table_name: str, conditions: Dict[str, Any]) -> List[Any]:
+    def delete(self, table_name: str, conditions: Dict[str, Any]) -> int:
         """
         Delete records from the specified table based on conditions with transaction support.
 
@@ -235,7 +363,7 @@ class PostgresDB:
             conditions (dict): Conditions for deletion.
 
         Returns:
-            List[Any]: List of deleted records.
+            int: Number of deleted records.
 
         Raises:
             SQLAlchemyDeleteError: If the delete operation fails.
@@ -243,16 +371,15 @@ class PostgresDB:
         Examples:
             >>> db = PostgresDB()
             >>> # Delete a specific user
-            >>> deleted_users = db.delete('users', {'id': 123})
-            >>> if deleted_users:
-            ...     print(f"Deleted user: {deleted_users[0].username}")
+            >>> deleted_count = db.delete('users', {'id': 123})
+            >>> print(f"Deleted {deleted_count} users")
             >>> 
             >>> # Delete all inactive users
-            >>> deleted_inactive = db.delete('users', {'is_active': False})
-            >>> print(f"Deleted {len(deleted_inactive)} inactive users")
+            >>> deleted_count = db.delete('users', {'is_active': False})
+            >>> print(f"Deleted {deleted_count} inactive users")
             >>> 
             >>> # Delete users by multiple conditions
-            >>> deleted_temp = db.delete('users', {
+            >>> deleted_count = db.delete('users', {
             ...     'role': 'temp_user',
             ...     'created_date': '2024-01-01'
             ... })
@@ -262,11 +389,10 @@ class PostgresDB:
             stmt = delete(table)
             for key, value in conditions.items():
                 stmt = stmt.where(table.c[key] == value)
-            stmt = stmt.returning(table)
             
             with self.engine.begin() as conn:
                 result = conn.execute(stmt)
-                return result.fetchall()
+                return result.rowcount
         except SQLAlchemyError as e:
             # Transaction automatically rolled back by the context manager
             raise SQLAlchemyDeleteError(f"Delete failed: {e}")
@@ -492,16 +618,84 @@ class PostgresDB:
 
     def close(self) -> None:
         """
-        Dispose the SQLAlchemy engine.
+        Close the singleton database connection.
+        
+        Note: In singleton mode, this will close the connection for all instances.
+        Use with caution as it affects the entire application.
         """
-        if self.engine:
-            self.engine.dispose()
+        if self._engine:
+            logger.info("Closing PostgresDB singleton connection")
+            self._engine.dispose()
+            self._engine = None
+            self._metadata = None
+            with self._lock:
+                self._connection_initialized = False
 
     def __enter__(self):
         """Context manager entry."""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit - automatically close connection."""
-        self.close()
+        """Context manager exit - connection is persistent, so no automatic close."""
+        # In singleton mode, we don't automatically close the connection
+        # as it's shared across the entire application
+        pass
+
+
+# Convenience function to get the singleton instance
+def get_session() -> PostgresDB:
+    """
+    Get the singleton PostgresDB instance.
+    
+    This function provides a convenient way to get the shared database
+    connection instance without needing to instantiate the class.
+    
+    Returns:
+        PostgresDB: The singleton PostgresDB instance
+        
+    Example:
+        >>> db = get_session()
+        >>> users = db.read('users')
+        >>> # Connection is automatically shared across all get_session() calls
+    """
+    return PostgresDB()
+
+
+# Global instance management
+def close_global_connection() -> None:
+    """
+    Close the global singleton database connection.
+    
+    This function should be called at application shutdown to properly
+    close the database connection and clean up resources.
+    
+    Example:
+        >>> # At application startup
+        >>> db = PostgresDB()
+        >>> 
+        >>> # ... application runs ...
+        >>> 
+        >>> # At application shutdown
+        >>> close_global_connection()
+    """
+    if PostgresDB._instance:
+        PostgresDB._instance.close()
+
+
+def get_connection_status() -> Dict[str, Any]:
+    """
+    Get the status of the global database connection.
+    
+    Returns:
+        Dict[str, Any]: Connection status information
+        
+    Example:
+        >>> status = get_connection_status()
+        >>> print(f"Connection status: {status['status']}")
+        >>> print(f"Pool size: {status['pool_size']}")
+    """
+    if PostgresDB._instance:
+        return PostgresDB._instance.get_connection_info()
+    else:
+        return {"status": "not_initialized"}
     

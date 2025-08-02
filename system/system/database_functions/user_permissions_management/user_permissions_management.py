@@ -40,8 +40,7 @@ Example:
 """
 
 import logging
-from typing import Dict, Any, List, Tuple, Optional
-from contextlib import contextmanager
+from typing import Dict, Any, List, Tuple
 
 from system.system.database_connections.pg_db import PostgresDB
 from system.system.database_connections.exceptions import (
@@ -76,74 +75,52 @@ class UserPermissionManager:
     
     This class provides a comprehensive interface for user permission management operations
     including CRUD operations, batch operations, search functionality, and
-    administrative tasks. All operations are transactional with proper error
-    handling and validation.
+    administrative tasks. All operations use the singleton PostgresDB connection
+    for optimal performance and resource management.
     
-    Attributes:
-        _db_connection: Optional PostgresDB connection instance
-        _auto_close: Whether to automatically close connections
+    Singleton Connection Benefits:
+        - Shared database connection across all UserPermissionManager instances
+        - Reduced connection overhead and improved performance  
+        - Automatic connection pooling and management
+        - Thread-safe database operations
         
     Examples:
-        >>> # Basic usage
+        >>> # All instances share the same database connection
+        >>> perm_manager1 = UserPermissionManager()
+        >>> perm_manager2 = UserPermissionManager()
+        >>> # Both use the same underlying connection
+        >>> 
+        >>> # Standard usage (no need for connection management)
         >>> perm_manager = UserPermissionManager()
         >>> permission = perm_manager.create_user_permission({
         ...     "user_id": 1, "resource_id": 10, "permission_type": "read", "granted_by": 5
         ... })
-        >>> perm_manager.close()
         >>> 
-        >>> # Using as context manager (recommended)
+        >>> # Context manager still supported
         >>> with UserPermissionManager() as perm_manager:
         ...     permissions = perm_manager.read_user_permissions(limit=5)
         ...     for permission in permissions['permissions']:
         ...         print(permission["permission_type"])
-        >>> 
-        >>> # Persistent connection for multiple operations
-        >>> perm_manager = UserPermissionManager(persistent_connection=True)
-        >>> perm1 = perm_manager.create_user_permission({...})
-        >>> perm2 = perm_manager.create_user_permission({...})
-        >>> perm_manager.close()  # Manual cleanup required
     """
     
-    def __init__(self, persistent_connection: bool = False) -> None:
+    def __init__(self) -> None:
         """Initialize the UserPermissionManager.
         
-        Args:
-            persistent_connection: If True, maintains a persistent database connection.
-                                 If False, creates new connections for each operation.
-                                 
-        Example:
-            >>> # Standard usage (new connection per operation)
-            >>> perm_manager = UserPermissionManager()
-            >>> 
-            >>> # Persistent connection for better performance with multiple operations
-            >>> perm_manager = UserPermissionManager(persistent_connection=True)
+        Uses the singleton PostgresDB instance for optimal performance.
+        No connection management needed as the singleton handles it automatically.
         """
-        self._db_connection: Optional[PostgresDB] = None
-        self._persistent_connection = persistent_connection
-        self._auto_close = True
-        
-        if persistent_connection:
-            self._db_connection = PostgresDB()
-            self._auto_close = False
+        # Get the singleton database instance
+        self._db = PostgresDB()
+        logger.debug("UserPermissionManager initialized with singleton database connection")
 
-    @contextmanager
     def _get_db_connection(self):
-        """Provide a transactional scope around a series of operations.
-        
-        This internal method handles connection management based on the
-        persistent_connection setting.
-        
-        Yields:
-            PostgresDB: An active database connection instance
         """
-        if self._persistent_connection and self._db_connection:
-            yield self._db_connection
-        else:
-            db = PostgresDB()
-            try:
-                yield db
-            finally:
-                db.close()
+        Get the singleton database connection.
+        
+        Returns:
+            PostgresDB: The singleton database connection instance
+        """
+        return self._db
 
     def _validate_permission_id(self, permission_id: Any) -> int:
         """Validate and convert permission ID to integer (internal helper method).
@@ -272,25 +249,25 @@ class UserPermissionManager:
             validated_dict = validated_data.model_dump()
             logger.debug(f"Creating user permission with data: {validated_dict}")
             
-            with self._get_db_connection() as db:
-                # Check for existing permission combination
-                self._check_permission_uniqueness(
-                    db, 
-                    validated_data.user_id, 
-                    validated_data.resource_id, 
-                    validated_data.permission_type
-                )
-                
-                # Create the permission
-                created_permissions = db.create(USER_PERMISSIONS_TABLE, validated_dict)
-                
-                if not created_permissions:
-                    raise UserPermissionCreateError("Failed to create user permission - no data returned")
-                
-                created_permission = dict(created_permissions._mapping)
-                logger.info(f"Successfully created user permission for user {created_permission.get('user_id', 'N/A')} (ID: {created_permission.get('id', 'N/A')})")
-                
-                return created_permission
+            db = self._get_db_connection()
+            # Check for existing permission combination
+            self._check_permission_uniqueness(
+                db, 
+                validated_data.user_id, 
+                validated_data.resource_id, 
+                validated_data.permission_type
+            )
+            
+            # Create the permission
+            created_permissions = db.create(USER_PERMISSIONS_TABLE, validated_dict)
+            
+            if not created_permissions:
+                raise UserPermissionCreateError("Failed to create user permission - no data returned")
+            
+            created_permission = dict(created_permissions._mapping)
+            logger.info(f"Successfully created user permission for user {created_permission.get('user_id', 'N/A')} (ID: {created_permission.get('id', 'N/A')})")
+            
+            return created_permission
                 
         except (UserPermissionValidationError, UserPermissionAlreadyExistsError):
             raise
@@ -325,10 +302,10 @@ class UserPermissionManager:
         permission_id = self._validate_permission_id(permission_id)
         
         try:
-            with self._get_db_connection() as db:
-                permission_data = self._check_permission_exists(db, permission_id)
-                logger.info(f"Successfully retrieved user permission for user {permission_data.get('user_id', 'N/A')} (ID: {permission_id})")
-                return permission_data
+            db = self._get_db_connection()
+            permission_data = self._check_permission_exists(db, permission_id)
+            logger.info(f"Successfully retrieved user permission for user {permission_data.get('user_id', 'N/A')} (ID: {permission_id})")
+            return permission_data
                 
         except UserPermissionNotFoundError:
             raise
@@ -379,31 +356,31 @@ class UserPermissionManager:
             
             logger.debug(f"Reading user permissions with filters: {filters}, limit: {limit}, offset: {offset}")
             
-            with self._get_db_connection() as db:
-                # Read permissions with filters
-                filter_dict = filters if filters else {}
-                all_permissions = db.read(USER_PERMISSIONS_TABLE, filter_dict)
-                
-                # Convert to list of dictionaries
-                permissions_list = [dict(permission._mapping) for permission in all_permissions]
-                total_count = len(permissions_list)
-                
-                # Apply pagination if specified
-                if limit is not None:
-                    end_index = offset + limit
-                    paginated_permissions = permissions_list[offset:end_index]
-                else:
-                    paginated_permissions = permissions_list[offset:] if offset > 0 else permissions_list
-                
-                result = {
-                    'permissions': paginated_permissions,
-                    'total_count': total_count,
-                    'limit': limit,
-                    'offset': offset
-                }
-                
-                logger.info(f"Retrieved {len(paginated_permissions)} user permissions out of {total_count} total")
-                return result
+            db = self._get_db_connection()
+            # Read permissions with filters
+            filter_dict = filters if filters else {}
+            all_permissions = db.read(USER_PERMISSIONS_TABLE, filter_dict)
+            
+            # Convert to list of dictionaries
+            permissions_list = [dict(permission._mapping) for permission in all_permissions]
+            total_count = len(permissions_list)
+            
+            # Apply pagination if specified
+            if limit is not None:
+                end_index = offset + limit
+                paginated_permissions = permissions_list[offset:end_index]
+            else:
+                paginated_permissions = permissions_list[offset:] if offset > 0 else permissions_list
+            
+            result = {
+                'permissions': paginated_permissions,
+                'total_count': total_count,
+                'limit': limit,
+                'offset': offset
+            }
+            
+            logger.info(f"Retrieved {len(paginated_permissions)} user permissions out of {total_count} total")
+            return result
                 
         except UserPermissionValidationError:
             raise
@@ -462,31 +439,31 @@ class UserPermissionManager:
             
             logger.debug(f"Updating user permission {permission_id} with data: {update_dict}")
             
-            with self._get_db_connection() as db:
-                # Check if permission exists and get current data
-                current_permission = self._check_permission_exists(db, permission_id)
+            db = self._get_db_connection()
+            # Check if permission exists and get current data
+            current_permission = self._check_permission_exists(db, permission_id)
+            
+            # Check for unique constraints if key fields are being updated
+            if any(field in update_dict for field in ['user_id', 'resource_id', 'permission_type']):
+                user_id = update_dict.get('user_id', current_permission['user_id'])
+                resource_id = update_dict.get('resource_id', current_permission['resource_id'])
+                permission_type = update_dict.get('permission_type', current_permission['permission_type'])
                 
-                # Check for unique constraints if key fields are being updated
-                if any(field in update_dict for field in ['user_id', 'resource_id', 'permission_type']):
-                    user_id = update_dict.get('user_id', current_permission['user_id'])
-                    resource_id = update_dict.get('resource_id', current_permission['resource_id'])
-                    permission_type = update_dict.get('permission_type', current_permission['permission_type'])
-                    
-                    self._check_permission_uniqueness(
-                        db, user_id, resource_id, permission_type, 
-                        exclude_permission_id=permission_id
-                    )
-                
-                # Update the permission
-                updated_permissions = db.update(USER_PERMISSIONS_TABLE, update_dict, {'id': permission_id})
-                
-                if not updated_permissions:
-                    raise UserPermissionUpdateError(f"Failed to update user permission {permission_id}")
-                
-                updated_permission = dict(updated_permissions[0]._mapping)
-                logger.info(f"Successfully updated user permission for user {updated_permission.get('user_id', 'N/A')} (ID: {permission_id})")
-                
-                return updated_permission
+                self._check_permission_uniqueness(
+                    db, user_id, resource_id, permission_type, 
+                    exclude_permission_id=permission_id
+                )
+            
+            # Update the permission
+            updated_permissions = db.update(USER_PERMISSIONS_TABLE, update_dict, {'id': permission_id})
+            
+            if not updated_permissions:
+                raise UserPermissionUpdateError(f"Failed to update user permission {permission_id}")
+            
+            updated_permission = dict(updated_permissions[0]._mapping)
+            logger.info(f"Successfully updated user permission for user {updated_permission.get('user_id', 'N/A')} (ID: {permission_id})")
+            
+            return updated_permission
                 
         except (UserPermissionValidationError, UserPermissionNotFoundError, UserPermissionAlreadyExistsError):
             raise
@@ -527,24 +504,24 @@ class UserPermissionManager:
         try:
             logger.debug(f"Deleting user permission {permission_id}")
             
-            with self._get_db_connection() as db:
-                # Check if permission exists
-                permission_data = self._check_permission_exists(db, permission_id)
-                
-                # Delete the permission
-                deleted_count = db.delete(USER_PERMISSIONS_TABLE, {'id': permission_id})
-                
-                if deleted_count == 0:
-                    raise UserPermissionDeleteError(f"Failed to delete user permission {permission_id}")
-                
-                result = {
-                    'success': True,
-                    'permission_id': permission_id,
-                    'message': 'User permission deleted successfully'
-                }
-                
-                logger.info(f"Successfully deleted user permission for user {permission_data.get('user_id', 'N/A')} (ID: {permission_id})")
-                return result
+            db = self._get_db_connection()
+            # Check if permission exists
+            permission_data = self._check_permission_exists(db, permission_id)
+            
+            # Delete the permission
+            deleted_count = db.delete(USER_PERMISSIONS_TABLE, {'id': permission_id})
+            
+            if deleted_count == 0:
+                raise UserPermissionDeleteError(f"Failed to delete user permission {permission_id}")
+            
+            result = {
+                'success': True,
+                'permission_id': permission_id,
+                'message': 'User permission deleted successfully'
+            }
+            
+            logger.info(f"Successfully deleted user permission for user {permission_data.get('user_id', 'N/A')} (ID: {permission_id})")
+            return result
                 
         except (UserPermissionValidationError, UserPermissionNotFoundError):
             raise
@@ -581,12 +558,12 @@ class UserPermissionManager:
             
             logger.debug(f"Retrieving permissions for user {user_id}")
             
-            with self._get_db_connection() as db:
-                permissions = db.read(USER_PERMISSIONS_TABLE, {'user_id': user_id})
-                permissions_list = [dict(permission._mapping) for permission in permissions]
-                
-                logger.info(f"Found {len(permissions_list)} permissions for user {user_id}")
-                return permissions_list
+            db = self._get_db_connection()
+            permissions = db.read(USER_PERMISSIONS_TABLE, {'user_id': user_id})
+            permissions_list = [dict(permission._mapping) for permission in permissions]
+            
+            logger.info(f"Found {len(permissions_list)} permissions for user {user_id}")
+            return permissions_list
                 
         except UserPermissionValidationError:
             raise
@@ -623,12 +600,12 @@ class UserPermissionManager:
             
             logger.debug(f"Retrieving permissions for resource {resource_id}")
             
-            with self._get_db_connection() as db:
-                permissions = db.read(USER_PERMISSIONS_TABLE, {'resource_id': resource_id})
-                permissions_list = [dict(permission._mapping) for permission in permissions]
-                
-                logger.info(f"Found {len(permissions_list)} permissions for resource {resource_id}")
-                return permissions_list
+            db = self._get_db_connection()
+            permissions = db.read(USER_PERMISSIONS_TABLE, {'resource_id': resource_id})
+            permissions_list = [dict(permission._mapping) for permission in permissions]
+            
+            logger.info(f"Found {len(permissions_list)} permissions for resource {resource_id}")
+            return permissions_list
                 
         except UserPermissionValidationError:
             raise
@@ -670,27 +647,27 @@ class UserPermissionManager:
             
             logger.debug(f"Searching user permissions for '{search_term}' in fields: {search_fields}")
             
-            with self._get_db_connection() as db:
-                # Get all permissions
-                all_permissions = db.read(USER_PERMISSIONS_TABLE)
-                permissions_list = [dict(permission._mapping) for permission in all_permissions]
-                
-                # Filter and score results
-                matching_permissions = []
-                for permission_dict in permissions_list:
-                    score = self._calculate_relevance_score(permission_dict, search_term, search_fields)
-                    if score > 0:
-                        permission_dict['_relevance_score'] = score
-                        matching_permissions.append(permission_dict)
-                
-                # Sort by relevance and apply limit
-                matching_permissions.sort(key=lambda x: x['_relevance_score'], reverse=True)
-                
-                # Remove the score field before returning
-                result_permissions = []
-                for permission in matching_permissions[:limit]:
-                    del permission['_relevance_score']
-                    result_permissions.append(permission)
+            db = self._get_db_connection()
+            # Get all permissions
+            all_permissions = db.read(USER_PERMISSIONS_TABLE)
+            permissions_list = [dict(permission._mapping) for permission in all_permissions]
+            
+            # Filter and score results
+            matching_permissions = []
+            for permission_dict in permissions_list:
+                score = self._calculate_relevance_score(permission_dict, search_term, search_fields)
+                if score > 0:
+                    permission_dict['_relevance_score'] = score
+                    matching_permissions.append(permission_dict)
+            
+            # Sort by relevance and apply limit
+            matching_permissions.sort(key=lambda x: x['_relevance_score'], reverse=True)
+            
+            # Remove the score field before returning
+            result_permissions = []
+            for permission in matching_permissions[:limit]:
+                del permission['_relevance_score']
+                result_permissions.append(permission)
                 
                 logger.info(f"Found {len(result_permissions)} permissions matching '{search_term}'")
                 return result_permissions
@@ -769,13 +746,13 @@ class UserPermissionManager:
         try:
             logger.debug(f"Counting permissions with filters: {filters}")
             
-            with self._get_db_connection() as db:
-                filter_dict = filters if filters else {}
-                permissions = db.read(USER_PERMISSIONS_TABLE, filter_dict)
-                count = len(permissions)
-                
-                logger.info(f"Counted {count} permissions")
-                return count
+            db = self._get_db_connection()
+            filter_dict = filters if filters else {}
+            permissions = db.read(USER_PERMISSIONS_TABLE, filter_dict)
+            count = len(permissions)
+            
+            logger.info(f"Counted {count} permissions")
+            return count
                 
         except SQLAlchemyReadError as e:
             logger.error(f"Database error counting permissions: {e}")
@@ -816,39 +793,39 @@ class UserPermissionManager:
         try:
             logger.debug(f"Bulk creating {len(permissions_data)} permissions")
             
-            with self._get_db_connection() as db:
-                for i, permission_data in enumerate(permissions_data):
-                    try:
-                        validated_data = UserPermissionCreate(**permission_data)
-                        validated_dict = validated_data.model_dump()
+            db = self._get_db_connection()
+            for i, permission_data in enumerate(permissions_data):
+                try:
+                    validated_data = UserPermissionCreate(**permission_data)
+                    validated_dict = validated_data.model_dump()
+                    
+                    # Check for existing permission if skip_duplicates is True
+                    if skip_duplicates:
+                        try:
+                            self._check_permission_uniqueness(
+                                db,
+                                validated_data.user_id,
+                                validated_data.resource_id,
+                                validated_data.permission_type
+                            )
+                        except UserPermissionAlreadyExistsError:
+                            results["skipped_count"] += 1
+                            continue
+                    
+                    # Create the permission
+                    created_permission = db.create(USER_PERMISSIONS_TABLE, validated_dict)
+                    if created_permission:
+                        results["created_count"] += 1
+                        results["created_permissions"].append(dict(created_permission._mapping))
+                    else:
+                        results["errors"].append(f"Failed to create permission at index {i}")
                         
-                        # Check for existing permission if skip_duplicates is True
-                        if skip_duplicates:
-                            try:
-                                self._check_permission_uniqueness(
-                                    db,
-                                    validated_data.user_id,
-                                    validated_data.resource_id,
-                                    validated_data.permission_type
-                                )
-                            except UserPermissionAlreadyExistsError:
-                                results["skipped_count"] += 1
-                                continue
-                        
-                        # Create the permission
-                        created_permission = db.create(USER_PERMISSIONS_TABLE, validated_dict)
-                        if created_permission:
-                            results["created_count"] += 1
-                            results["created_permissions"].append(dict(created_permission._mapping))
-                        else:
-                            results["errors"].append(f"Failed to create permission at index {i}")
-                            
-                    except Exception as exc:
-                        error_msg = f"Error at index {i}: {str(exc)}"
-                        results["errors"].append(error_msg)
-                
-                logger.info(f"Bulk create completed: {results['created_count']} created, {results['skipped_count']} skipped, {len(results['errors'])} errors")
-                return results
+                except Exception as exc:
+                    error_msg = f"Error at index {i}: {str(exc)}"
+                    results["errors"].append(error_msg)
+            
+            logger.info(f"Bulk create completed: {results['created_count']} created, {results['skipped_count']} skipped, {len(results['errors'])} errors")
+            return results
                 
         except SQLAlchemyInsertError as e:
             logger.error(f"Database error during bulk create: {e}")
@@ -882,24 +859,24 @@ class UserPermissionManager:
         try:
             logger.debug(f"Bulk deleting {len(permission_ids)} permissions")
             
-            with self._get_db_connection() as db:
-                for permission_id in permission_ids:
-                    try:
-                        validated_id = self._validate_permission_id(permission_id)
+            db = self._get_db_connection()
+            for permission_id in permission_ids:
+                try:
+                    validated_id = self._validate_permission_id(permission_id)
+                    
+                    # Check if permission exists
+                    self._check_permission_exists(db, validated_id)
+                    
+                    # Delete the permission
+                    deleted_count = db.delete(USER_PERMISSIONS_TABLE, {'id': validated_id})
+                    if deleted_count > 0:
+                        results["deleted_count"] += 1
+                    else:
+                        results["errors"].append(f"Failed to delete permission {validated_id}")
                         
-                        # Check if permission exists
-                        self._check_permission_exists(db, validated_id)
-                        
-                        # Delete the permission
-                        deleted_count = db.delete(USER_PERMISSIONS_TABLE, {'id': validated_id})
-                        if deleted_count > 0:
-                            results["deleted_count"] += 1
-                        else:
-                            results["errors"].append(f"Failed to delete permission {validated_id}")
-                            
-                    except Exception as exc:
-                        error_msg = f"Error deleting permission {permission_id}: {str(exc)}"
-                        results["errors"].append(error_msg)
+                except Exception as exc:
+                    error_msg = f"Error deleting permission {permission_id}: {str(exc)}"
+                    results["errors"].append(error_msg)
                 
                 logger.info(f"Bulk delete completed: {results['deleted_count']} deleted, {len(results['errors'])} errors")
                 return results
@@ -912,28 +889,29 @@ class UserPermissionManager:
             raise UserPermissionDeleteError(f"Bulk delete failed: {str(e)}") from e
 
     def close(self) -> None:
-        """Close the database connection if using persistent connection.
+        """
+        Close method for backward compatibility.
         
-        This method should be called when finished with the UserPermissionManager
-        if using persistent_connection=True, or when explicitly needed.
+        Note: In singleton mode, the database connection is shared and persistent.
+        This method exists for backward compatibility but doesn't actually close
+        the connection as it's managed by the singleton.
         
         Example:
-            >>> perm_manager = UserPermissionManager(persistent_connection=True)
+            >>> perm_manager = UserPermissionManager()
             >>> # ... perform operations ...
-            >>> perm_manager.close()  # Clean up resources
+            >>> perm_manager.close()  # No-op in singleton mode
         """
-        if self._db_connection:
-            self._db_connection.close()
-            self._db_connection = None
+        # No-op in singleton mode - connection is managed globally
+        pass
 
     def __enter__(self) -> 'UserPermissionManager':
         """Context manager entry."""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Context manager exit - automatically close connection if needed."""
-        if self._auto_close or self._persistent_connection:
-            self.close()
+        """Context manager exit - connection is persistent in singleton mode."""
+        # No cleanup needed as connection is managed by singleton
+        pass
 
 
 # Backward compatibility functions - delegates to UserPermissionManager class

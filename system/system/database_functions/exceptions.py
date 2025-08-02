@@ -88,3 +88,38 @@ class UserDeleteError(UserManagementError):
 class UserValidationError(UserManagementError):
     """Raised when user validation fails."""
     pass
+
+
+class UserPermissionManagementError(DatabaseFunctionError):
+    """Base exception for user permission management operations."""
+    pass
+
+
+class UserPermissionNotFoundError(UserPermissionManagementError):
+    """Raised when a user permission is not found."""
+    pass
+
+
+class UserPermissionCreateError(UserPermissionManagementError):
+    """Raised when user permission creation fails."""
+    pass
+
+
+class UserPermissionUpdateError(UserPermissionManagementError):
+    """Raised when user permission update fails."""
+    pass
+
+
+class UserPermissionDeleteError(UserPermissionManagementError):
+    """Raised when user permission deletion fails."""
+    pass
+
+
+class UserPermissionValidationError(UserPermissionManagementError):
+    """Raised when user permission validation fails."""
+    pass
+
+
+class UserPermissionAlreadyExistsError(UserPermissionManagementError):
+    """Raised when a user permission already exists."""
+    pass
