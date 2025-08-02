@@ -55,6 +55,7 @@ class TransactionRollbackError(DatabaseFunctionError):
     pass
 
 
+# User Management Exceptions
 class UserAlreadyExistsException(DatabaseFunctionError):
     """Raised when a user with the given unique field already exists."""
     pass
@@ -90,6 +91,7 @@ class UserValidationError(UserManagementError):
     pass
 
 
+# User Permission Management Exceptions
 class UserPermissionManagementError(DatabaseFunctionError):
     """Base exception for user permission management operations."""
     pass
@@ -122,4 +124,40 @@ class UserPermissionValidationError(UserPermissionManagementError):
 
 class UserPermissionAlreadyExistsError(UserPermissionManagementError):
     """Raised when a user permission already exists."""
+    pass
+
+
+# Session Management Exceptions
+class SessionManagementError(DatabaseFunctionError):
+    """Base exception for session management operations."""
+    pass
+
+
+class SessionNotFoundError(SessionManagementError):
+    """Raised when a session is not found."""
+    pass
+
+
+class SessionCreateError(SessionManagementError):
+    """Raised when session creation fails."""
+    pass
+
+
+class SessionUpdateError(SessionManagementError):
+    """Raised when session update fails."""
+    pass
+
+
+class SessionDeleteError(SessionManagementError):
+    """Raised when session deletion fails."""
+    pass
+
+
+class SessionValidationError(SessionManagementError):
+    """Raised when session validation fails."""
+    pass
+
+
+class SessionAlreadyExistsError(SessionManagementError):
+    """Raised when a session already exists."""
     pass
