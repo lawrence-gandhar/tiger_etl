@@ -1,12 +1,40 @@
-"""User group management database functions.
+"""User group management database operations using Object-Oriented Programming.
 
-This module contains optimized database functions for managing user groups,
-including creation, deletion, and relationship management with proper
-transaction handling and error management.
+This module provides a comprehensive UserGroupManager class for handling all user group-related
+database operations including CRUD operations, mapping management, search functionality, and
+batch operations. All operations are transactional with proper error handling and validation.
+
+Example:
+    Basic user group management operations using the UserGroupManager class:
+    
+    >>> # Initialize the user group manager
+    >>> group_manager = UserGroupManager()
+    >>> 
+    >>> # Create a new user group
+    >>> group_data = {"name": "Administrators", "description": "Admin group"}
+    >>> new_group = group_manager.create_user_group(group_data)
+    >>> print(new_group["name"])
+    Administrators
+    
+    >>> # Get group by ID
+    >>> group = group_manager.read_user_group(1)
+    >>> print(group["name"])
+    Administrators
+    
+    >>> # Update group
+    >>> update_data = {"description": "Updated admin group"}
+    >>> updated_group = group_manager.update_user_group(1, update_data)
+    >>> print(updated_group["description"])
+    Updated admin group
+    
+    >>> # Use as context manager for automatic cleanup
+    >>> with UserGroupManager() as group_manager:
+    ...     groups = group_manager.read_user_groups(limit=10)
+    ...     print(f"Found {len(groups['groups'])} groups")
 """
 
 import logging
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from contextlib import contextmanager
 
 from sqlalchemy.orm import Session
@@ -46,6 +74,748 @@ from system.system.constants.model_constants.user_group_management_constants imp
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+
+class UserGroupManager:
+    """Object-oriented user group management class for database operations.
+    
+    This class provides a comprehensive interface for user group management operations
+    including CRUD operations, mapping management, search functionality, batch operations,
+    and administrative tasks. All operations are transactional with proper error
+    handling and validation.
+    
+    Attributes:
+        _db_connection: Optional PostgresDB connection instance
+        _auto_close: Whether to automatically close connections
+        
+    Examples:
+        >>> # Basic usage
+        >>> group_manager = UserGroupManager()
+        >>> group = group_manager.create_user_group({"name": "Test Group", "description": "Test"})
+        >>> group_manager.close()
+        >>> 
+        >>> # Using as context manager (recommended)
+        >>> with UserGroupManager() as group_manager:
+        ...     groups = group_manager.read_user_groups(limit=5)
+        ...     for group in groups['groups']:
+        ...         print(group["name"])
+        >>> 
+        >>> # Persistent connection for multiple operations
+        >>> group_manager = UserGroupManager(persistent_connection=True)
+        >>> group1 = group_manager.create_user_group({"name": "Group 1", "description": "First group"})
+        >>> group2 = group_manager.create_user_group({"name": "Group 2", "description": "Second group"})
+        >>> group_manager.close()  # Manual cleanup required
+    """
+    
+    def __init__(self, persistent_connection: bool = False) -> None:
+        """Initialize the UserGroupManager.
+        
+        Args:
+            persistent_connection: If True, maintains a persistent database connection.
+                                 If False, creates new connections for each operation.
+                                 
+        Example:
+            >>> # Standard usage (new connection per operation)
+            >>> group_manager = UserGroupManager()
+            >>> 
+            >>> # Persistent connection for better performance with multiple operations
+            >>> group_manager = UserGroupManager(persistent_connection=True)
+        """
+        self._db_connection: Optional[PostgresDB] = None
+        self._persistent_connection = persistent_connection
+        self._auto_close = True
+        
+        if persistent_connection:
+            self._db_connection = PostgresDB()
+            self._auto_close = False
+
+    @contextmanager
+    def _get_db_connection(self):
+        """Provide a transactional scope around a series of operations.
+        
+        This internal method handles connection management based on the
+        persistent_connection setting.
+        
+        Yields:
+            PostgresDB: An active database connection instance
+        """
+        if self._persistent_connection and self._db_connection:
+            yield self._db_connection
+        else:
+            db = PostgresDB()
+            try:
+                yield db
+            finally:
+                db.close()
+
+    def _validate_group_id(self, group_id: Any) -> int:
+        """Validate and convert group ID to integer (internal helper method).
+        
+        Args:
+            group_id: The group ID to validate
+            
+        Returns:
+            Validated integer group ID
+            
+        Raises:
+            UserGroupValidationError: If group ID is invalid
+        """
+        try:
+            if group_id is None:
+                raise UserGroupValidationError("Group ID cannot be None")
+            
+            if isinstance(group_id, str) and not group_id.strip():
+                raise UserGroupValidationError("Group ID cannot be empty string")
+            
+            group_id_int = int(group_id)
+            
+            if group_id_int <= 0:
+                raise UserGroupValidationError("Group ID must be a positive integer")
+            
+            return group_id_int
+            
+        except (ValueError, TypeError) as e:
+            raise UserGroupValidationError(f"Invalid group ID format: {group_id}") from e
+
+    def _check_group_exists(self, db_instance: Any, group_id: int) -> Dict[str, Any]:
+        """Check if a group exists and return its data (internal helper method).
+        
+        Args:
+            db_instance: Database connection instance
+            group_id: The group ID to check
+            
+        Returns:
+            Dictionary containing the group data
+            
+        Raises:
+            UserGroupNotFoundError: If group doesn't exist
+        """
+        try:
+            logger.debug(f"Checking if group {group_id} exists")
+            groups = db_instance.read(USER_GROUPS_TABLE, {'id': group_id})
+            
+            if not groups or len(groups) == 0:
+                logger.warning(f"Group with ID {group_id} not found")
+                raise UserGroupNotFoundError(f"User group with ID {group_id} not found")
+            
+            group_dict = dict(groups[0]._mapping)
+            logger.debug(f"Group {group_id} found: {group_dict.get('name', 'N/A')}")
+            return group_dict
+            
+        except SQLAlchemyReadError as e:
+            logger.error(f"Database error while checking group {group_id}: {e}")
+            raise UserGroupNotFoundError(f"Error checking group existence: {e}") from e
+
+    def _get_group_mappings(self, db_instance: PostgresDB, group_id: int) -> List[Dict[str, Any]]:
+        """Retrieve all mappings for a specific group (internal helper method).
+        
+        Args:
+            db_instance: Database connection instance
+            group_id: The group ID to get mappings for
+            
+        Returns:
+            List of mapping dictionaries
+        """
+        try:
+            logger.debug(f"Retrieving mappings for group {group_id}")
+            mappings = db_instance.read(USER_GROUP_MAPPER_TABLE, {'group_id': group_id})
+            
+            mapping_list = [dict(mapping._mapping) for mapping in mappings]
+            logger.debug(f"Found {len(mapping_list)} mappings for group {group_id}")
+            return mapping_list
+            
+        except SQLAlchemyReadError as e:
+            logger.error(f"Error retrieving mappings for group {group_id}: {e}")
+            raise UserGroupMapperError(f"Error retrieving group mappings: {e}") from e
+
+    def get_group_with_mappings(self, group_id: int) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """Retrieve a group along with all its user mappings.
+        
+        Args:
+            group_id: The unique identifier of the group
+            
+        Returns:
+            Tuple containing (group_data, mappings_list)
+            
+        Raises:
+            UserGroupNotFoundError: If group doesn't exist
+            UserGroupMapperError: If error retrieving mappings
+            
+        Example:
+            >>> group_manager = UserGroupManager()
+            >>> group, mappings = group_manager.get_group_with_mappings(1)
+            >>> print(f"Group: {group['name']}, Mappings: {len(mappings)}")
+        """
+        group_id = self._validate_group_id(group_id)
+        
+        try:
+            with self._get_db_connection() as db:
+                # Get group data
+                group_data = self._check_group_exists(db, group_id)
+                
+                # Get mappings
+                mappings = self._get_group_mappings(db, group_id)
+                
+                logger.info(f"Retrieved group {group_id} with {len(mappings)} mappings")
+                return group_data, mappings
+                
+        except (UserGroupNotFoundError, UserGroupMapperError):
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error retrieving group {group_id} with mappings: {e}")
+            raise UserGroupNotFoundError(f"Error retrieving group data: {e}") from e
+
+    def create_user_group(self, group_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new user group.
+        
+        Validates the group data and creates a new group record.
+        
+        Args:
+            group_data: Dictionary containing group information (name required)
+            
+        Returns:
+            Dictionary containing the created group data with database-generated fields
+            
+        Raises:
+            UserGroupValidationError: If group data validation fails
+            UserGroupCreateError: If group creation fails
+            
+        Example:
+            >>> group_manager = UserGroupManager()
+            >>> group_data = {
+            ...     "name": "Administrators",
+            ...     "description": "Administrator group"
+            ... }
+            >>> new_group = group_manager.create_user_group(group_data)
+            >>> print(new_group["id"])  # Auto-generated ID
+            1
+            >>> print(new_group["name"])
+            Administrators
+        """
+        try:
+            # Validate group data
+            validated_data = validate_group_create_data(group_data)
+            logger.debug(f"Creating user group with data: {validated_data}")
+            
+            with self._get_db_connection() as db:
+                # Create the group
+                created_groups = db.create(USER_GROUPS_TABLE, validated_data)
+                
+                if not created_groups:
+                    raise UserGroupCreateError("Failed to create user group - no data returned")
+                
+                created_group = dict(created_groups._mapping)
+                logger.info(f"Successfully created user group: {created_group.get('name', 'N/A')} (ID: {created_group.get('id', 'N/A')})")
+                
+                return created_group
+                
+        except UserGroupValidationError:
+            raise
+        except SQLAlchemyInsertError as e:
+            logger.error(f"Database error creating user group: {e}")
+            raise UserGroupCreateError(f"Database error creating user group: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error creating user group: {e}")
+            raise UserGroupCreateError(f"Unexpected error creating user group: {e}") from e
+
+    def read_user_group(self, group_id: Any) -> Dict[str, Any]:
+        """Retrieve a user group by its ID.
+        
+        Args:
+            group_id: The unique identifier of the group
+            
+        Returns:
+            Dictionary containing the group data
+            
+        Raises:
+            UserGroupValidationError: If group ID is invalid
+            UserGroupNotFoundError: If group doesn't exist
+            
+        Example:
+            >>> group_manager = UserGroupManager()
+            >>> group = group_manager.read_user_group(1)
+            >>> print(group["name"])
+            Administrators
+            >>> print(group["description"])
+            Administrator group
+        """
+        group_id = self._validate_group_id(group_id)
+        
+        try:
+            with self._get_db_connection() as db:
+                group_data = self._check_group_exists(db, group_id)
+                logger.info(f"Successfully retrieved user group: {group_data.get('name', 'N/A')} (ID: {group_id})")
+                return group_data
+                
+        except UserGroupNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error reading user group {group_id}: {e}")
+            raise UserGroupNotFoundError(f"Error reading user group: {e}") from e
+
+    def read_user_groups(self, filters: Dict[str, Any] = None, limit: int = None, offset: int = 0) -> Dict[str, Any]:
+        """Retrieve multiple user groups with optional filtering and pagination.
+        
+        Args:
+            filters: Optional dictionary of filters to apply
+            limit: Maximum number of groups to return
+            offset: Number of groups to skip (for pagination)
+            
+        Returns:
+            Dictionary containing:
+            - groups: List of group dictionaries
+            - total_count: Total number of groups matching filters
+            - limit: Applied limit
+            - offset: Applied offset
+            
+        Raises:
+            UserGroupValidationError: If parameters are invalid
+            UserGroupNotFoundError: If database error occurs
+            
+        Example:
+            >>> group_manager = UserGroupManager()
+            >>> # Get all groups
+            >>> result = group_manager.read_user_groups()
+            >>> print(f"Found {result['total_count']} groups")
+            
+            >>> # Get groups with pagination
+            >>> result = group_manager.read_user_groups(limit=10, offset=0)
+            >>> print(f"Page 1: {len(result['groups'])} groups")
+            
+            >>> # Get groups with filters
+            >>> filters = {"is_active": True}
+            >>> result = group_manager.read_user_groups(filters=filters)
+        """
+        try:
+            # Validate inputs
+            if filters:
+                validate_group_filters(filters)
+            
+            if limit is not None or offset != 0:
+                validate_pagination_params(limit, offset)
+            
+            logger.debug(f"Reading user groups with filters: {filters}, limit: {limit}, offset: {offset}")
+            
+            with self._get_db_connection() as db:
+                # Read groups with filters
+                filter_dict = filters if filters else {}
+                all_groups = db.read(USER_GROUPS_TABLE, filter_dict)
+                
+                # Convert to list of dictionaries
+                groups_list = [dict(group._mapping) for group in all_groups]
+                total_count = len(groups_list)
+                
+                # Apply pagination if specified
+                if limit is not None:
+                    end_index = offset + limit
+                    paginated_groups = groups_list[offset:end_index]
+                else:
+                    paginated_groups = groups_list[offset:] if offset > 0 else groups_list
+                
+                result = {
+                    'groups': paginated_groups,
+                    'total_count': total_count,
+                    'limit': limit,
+                    'offset': offset
+                }
+                
+                logger.info(f"Retrieved {len(paginated_groups)} user groups out of {total_count} total")
+                return result
+                
+        except UserGroupValidationError:
+            raise
+        except SQLAlchemyReadError as e:
+            logger.error(f"Database error reading user groups: {e}")
+            raise UserGroupNotFoundError(f"Database error reading user groups: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error reading user groups: {e}")
+            raise UserGroupNotFoundError(f"Unexpected error reading user groups: {e}") from e
+
+    def update_user_group(self, group_id: Any, update_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update an existing user group's information.
+        
+        Performs partial updates - only provided fields will be modified.
+        Validates the group exists before attempting the update.
+        
+        Args:
+            group_id: The unique identifier of the group to update
+            update_data: Dictionary containing fields to update
+            
+        Returns:
+            Dictionary containing the updated group data
+            
+        Raises:
+            UserGroupValidationError: If group ID or update data is invalid
+            UserGroupNotFoundError: If group doesn't exist
+            UserGroupUpdateError: If the update operation fails
+            
+        Example:
+            >>> group_manager = UserGroupManager()
+            >>> # Update group's description only
+            >>> update_data = {"description": "Updated admin group"}
+            >>> updated_group = group_manager.update_user_group(1, update_data)
+            >>> print(updated_group["description"])
+            Updated admin group
+            
+            >>> # Update multiple fields
+            >>> update_data = {
+            ...     "name": "Super Administrators",
+            ...     "description": "Super admin group with extended privileges"
+            ... }
+            >>> updated_group = group_manager.update_user_group(1, update_data)
+        """
+        group_id = self._validate_group_id(group_id)
+        
+        try:
+            # Validate update data
+            validated_update_data = validate_group_update_data(update_data)
+            logger.debug(f"Updating user group {group_id} with data: {validated_update_data}")
+            
+            with self._get_db_connection() as db:
+                # Check if group exists
+                self._check_group_exists(db, group_id)
+                
+                # Check for unique constraints if name is being updated
+                if 'name' in validated_update_data:
+                    self._check_group_name_uniqueness(db, validated_update_data['name'], exclude_group_id=group_id)
+                
+                # Update the group
+                updated_groups = db.update(USER_GROUPS_TABLE, validated_update_data, {'id': group_id})
+                
+                if not updated_groups:
+                    raise UserGroupUpdateError(f"Failed to update user group {group_id}")
+                
+                updated_group = dict(updated_groups[0]._mapping)
+                logger.info(f"Successfully updated user group: {updated_group.get('name', 'N/A')} (ID: {group_id})")
+                
+                return updated_group
+                
+        except (UserGroupValidationError, UserGroupNotFoundError):
+            raise
+        except SQLAlchemyUpdateError as e:
+            logger.error(f"Database error updating user group {group_id}: {e}")
+            raise UserGroupUpdateError(f"Database error updating user group: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error updating user group {group_id}: {e}")
+            raise UserGroupUpdateError(f"Unexpected error updating user group: {e}") from e
+
+    def _check_group_name_uniqueness(self, db_instance: PostgresDB, group_name: str, exclude_group_id: int = None) -> None:
+        """Check if group name is unique (internal helper method).
+        
+        Args:
+            db_instance: Database connection instance
+            group_name: The group name to check
+            exclude_group_id: Group ID to exclude from uniqueness check (for updates)
+            
+        Raises:
+            UserGroupValidationError: If name is not unique
+        """
+        try:
+            existing_groups = db_instance.read(USER_GROUPS_TABLE, {'name': group_name})
+            
+            if existing_groups:
+                for group in existing_groups:
+                    group_dict = dict(group._mapping)
+                    if exclude_group_id is None or group_dict['id'] != exclude_group_id:
+                        raise UserGroupValidationError(f"Group name '{group_name}' already exists")
+                        
+        except SQLAlchemyReadError as e:
+            logger.error(f"Database error checking group name uniqueness: {e}")
+            raise UserGroupValidationError(f"Error checking group name uniqueness: {e}") from e
+
+    def search_user_groups(self, search_term: str, search_fields: List[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
+        """Search user groups by term across specified fields.
+        
+        Args:
+            search_term: Term to search for
+            search_fields: List of fields to search in (default: ['name', 'description'])
+            limit: Maximum number of results to return
+            
+        Returns:
+            List of matching group dictionaries, sorted by relevance
+            
+        Raises:
+            UserGroupValidationError: If search parameters are invalid
+            UserGroupNotFoundError: If database error occurs
+            
+        Example:
+            >>> group_manager = UserGroupManager()
+            >>> # Search by default fields
+            >>> results = group_manager.search_user_groups("admin")
+            >>> for group in results:
+            ...     print(f"Found: {group['name']}")
+            
+            >>> # Search specific fields
+            >>> results = group_manager.search_user_groups("test", search_fields=["name"], limit=5)
+        """
+        try:
+            # Validate search parameters
+            search_term, search_fields, limit = self._validate_search_params(search_term, search_fields, limit)
+            
+            logger.debug(f"Searching user groups for '{search_term}' in fields: {search_fields}")
+            
+            with self._get_db_connection() as db:
+                # Get all groups
+                all_groups = db.read(USER_GROUPS_TABLE)
+                groups_list = [dict(group._mapping) for group in all_groups]
+                
+                # Filter and score results
+                matching_groups = []
+                for group_dict in groups_list:
+                    score = self._calculate_relevance_score(group_dict, search_term, search_fields)
+                    if score > 0:
+                        group_dict['_relevance_score'] = score
+                        matching_groups.append(group_dict)
+                
+                # Sort by relevance and apply limit
+                matching_groups.sort(key=lambda x: x['_relevance_score'], reverse=True)
+                
+                # Remove the score field before returning
+                result_groups = []
+                for group in matching_groups[:limit]:
+                    del group['_relevance_score']
+                    result_groups.append(group)
+                
+                logger.info(f"Found {len(result_groups)} groups matching '{search_term}'")
+                return result_groups
+                
+        except UserGroupValidationError:
+            raise
+        except SQLAlchemyReadError as e:
+            logger.error(f"Database error during search: {e}")
+            raise UserGroupNotFoundError(f"Database error during search: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error during search: {e}")
+            raise UserGroupNotFoundError(f"Unexpected error during search: {e}") from e
+
+    def _validate_search_params(self, search_term: str, search_fields: List[str], limit: int) -> Tuple[str, List[str], int]:
+        """Validate and normalize search parameters (internal helper method)."""
+        # Validate search term
+        if not search_term or not isinstance(search_term, str) or not search_term.strip():
+            raise UserGroupValidationError("Search term must be a non-empty string")
+        
+        search_term = search_term.strip()
+        
+        # Validate and set default search fields
+        if search_fields is None:
+            search_fields = ['name', 'description']
+        elif not isinstance(search_fields, list) or not search_fields:
+            raise UserGroupValidationError("Search fields must be a non-empty list")
+        
+        # Validate limit
+        if not isinstance(limit, int) or limit <= 0:
+            raise UserGroupValidationError("Limit must be a positive integer")
+        
+        return search_term, search_fields, limit
+
+    def _calculate_relevance_score(self, group_dict: Dict[str, Any], search_term: str, search_fields: List[str]) -> float:
+        """Calculate relevance score for search results (internal helper method)."""
+        score = 0.0
+        search_lower = search_term.lower()
+        
+        for field in search_fields:
+            if field in group_dict and group_dict[field]:
+                field_value = str(group_dict[field]).lower()
+                
+                # Exact match gets highest score
+                if search_lower == field_value:
+                    score += 10.0
+                # Starts with search term gets high score
+                elif field_value.startswith(search_lower):
+                    score += 5.0
+                # Contains search term gets medium score
+                elif search_lower in field_value:
+                    score += 2.0
+        
+        return score
+
+    def delete_user_group_with_mappings(self, group_id: Any, force_delete: bool = False) -> Dict[str, Any]:
+        """Delete a user group and optionally its mappings.
+        
+        Args:
+            group_id: The unique identifier of the group to delete
+            force_delete: If True, deletes mappings first; if False, fails if mappings exist
+            
+        Returns:
+            Dictionary containing deletion results:
+            - success: Boolean indicating if deletion was successful
+            - group_id: The ID of the deleted group
+            - mappings_deleted: Number of mappings deleted (if force_delete=True)
+            - message: Descriptive message about the operation
+            
+        Raises:
+            UserGroupValidationError: If group ID is invalid
+            UserGroupNotFoundError: If group doesn't exist
+            UserGroupDeleteError: If deletion fails or mappings exist without force_delete
+            
+        Example:
+            >>> group_manager = UserGroupManager()
+            >>> # Safe delete (fails if mappings exist)
+            >>> result = group_manager.delete_user_group_with_mappings(1, force_delete=False)
+            >>> 
+            >>> # Force delete (removes mappings first)
+            >>> result = group_manager.delete_user_group_with_mappings(1, force_delete=True)
+            >>> print(f"Deleted {result['mappings_deleted']} mappings")
+        """
+        group_id = self._validate_group_id(group_id)
+        
+        try:
+            logger.debug(f"Attempting to delete user group {group_id} (force_delete: {force_delete})")
+            
+            with self._get_db_connection() as db:
+                # Check if group exists
+                group_data = self._check_group_exists(db, group_id)
+                
+                # Get current mappings
+                mappings = self._get_group_mappings(db, group_id)
+                mappings_count = len(mappings)
+                
+                # Handle mappings based on force_delete flag
+                if mappings_count > 0:
+                    if not force_delete:
+                        raise UserGroupDeleteError(
+                            f"Cannot delete group {group_id}: {mappings_count} user mappings exist. "
+                            "Use force_delete=True to delete mappings first."
+                        )
+                    
+                    # Delete all mappings first
+                    for mapping in mappings:
+                        mapping_id = mapping['id']
+                        db.delete(USER_GROUP_MAPPER_TABLE, {'id': mapping_id})
+                    
+                    logger.info(f"Deleted {mappings_count} mappings for group {group_id}")
+                
+                # Delete the group
+                db.delete(USER_GROUPS_TABLE, {'id': group_id})
+                
+                result = {
+                    'success': True,
+                    'group_id': group_id,
+                    'mappings_deleted': mappings_count if force_delete else 0,
+                    'message': f"Successfully deleted group '{group_data.get('name', 'N/A')}' and {mappings_count if force_delete else 0} mappings"
+                }
+                
+                logger.info(f"Successfully deleted user group {group_id}")
+                return result
+                
+        except (UserGroupValidationError, UserGroupNotFoundError, UserGroupDeleteError):
+            raise
+        except (SQLAlchemyDeleteError, SQLAlchemyReadError) as e:
+            logger.error(f"Database error deleting user group {group_id}: {e}")
+            raise UserGroupDeleteError(f"Database error deleting user group: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error deleting user group {group_id}: {e}")
+            raise UserGroupDeleteError(f"Unexpected error deleting user group: {e}") from e
+
+    def delete_user_group_safe(self, group_id: Any) -> Dict[str, Any]:
+        """Safely delete a user group (fails if mappings exist).
+        
+        This is a convenience method that calls delete_user_group_with_mappings
+        with force_delete=False.
+        
+        Args:
+            group_id: The unique identifier of the group to delete
+            
+        Returns:
+            Dictionary containing deletion results
+            
+        Raises:
+            UserGroupDeleteError: If mappings exist or deletion fails
+        """
+        return self.delete_user_group_with_mappings(group_id, force_delete=False)
+
+    def delete_user_group_force(self, group_id: Any) -> Dict[str, Any]:
+        """Force delete a user group (removes mappings first).
+        
+        This is a convenience method that calls delete_user_group_with_mappings
+        with force_delete=True.
+        
+        Args:
+            group_id: The unique identifier of the group to delete
+            
+        Returns:
+            Dictionary containing deletion results including mappings deleted
+        """
+        return self.delete_user_group_with_mappings(group_id, force_delete=True)
+
+    def group_exists(self, group_id: int) -> bool:
+        """Check if a group exists by its ID.
+        
+        Args:
+            group_id: The unique identifier of the group
+            
+        Returns:
+            True if group exists, False otherwise
+            
+        Example:
+            >>> group_manager = UserGroupManager()
+            >>> if group_manager.group_exists(1):
+            ...     print("Group exists")
+            ... else:
+            ...     print("Group not found")
+        """
+        try:
+            group_id = self._validate_group_id(group_id)
+            with self._get_db_connection() as db:
+                groups = db.read(USER_GROUPS_TABLE, {'id': group_id})
+                return len(groups) > 0
+        except (UserGroupValidationError, SQLAlchemyReadError):
+            return False
+
+    def count_user_groups(self, filters: Dict[str, Any] = None) -> int:
+        """Count the total number of user groups, optionally filtered.
+        
+        Args:
+            filters: Optional dictionary of filters to apply
+            
+        Returns:
+            Total number of groups matching the criteria
+            
+        Example:
+            >>> group_manager = UserGroupManager()
+            >>> total_groups = group_manager.count_user_groups()
+            >>> print(f"Total groups: {total_groups}")
+            
+            >>> # Count active groups only
+            >>> active_count = group_manager.count_user_groups({"is_active": True})
+            >>> print(f"Active groups: {active_count}")
+        """
+        try:
+            with self._get_db_connection() as db:
+                filter_dict = filters if filters else {}
+                groups = db.read(USER_GROUPS_TABLE, filter_dict)
+                return len(groups)
+        except SQLAlchemyReadError as e:
+            logger.error(f"Database error counting groups: {e}")
+            raise UserGroupNotFoundError(f"Error counting groups: {e}") from e
+
+    def close(self) -> None:
+        """Close the database connection if using persistent connection.
+        
+        This method should be called when finished with the UserGroupManager
+        if using persistent_connection=True, or when explicitly needed.
+        
+        Example:
+            >>> group_manager = UserGroupManager(persistent_connection=True)
+            >>> # ... perform operations ...
+            >>> group_manager.close()  # Clean up resources
+        """
+        if self._db_connection:
+            self._db_connection.close()
+            self._db_connection = None
+
+    def __enter__(self) -> 'UserGroupManager':
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit - automatically close connection if needed."""
+        if self._auto_close or self._persistent_connection:
+            self.close()
+
+
+# Backward compatibility functions - delegates to UserGroupManager class
+# These functions maintain the existing functional API while using the new OOP implementation
 
 
 @contextmanager
