@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tiger ETL - Sign Up</title>
+    <link href="{{ url_for('static', path='/css/style.css') }}" rel="stylesheet" type="text/css">
+    <link href="{{ url_for('static', path='/css/signup.css') }}" rel="stylesheet" type="text/css">
+</head>
+<body>
+    <div class="login-container signup-container">
+        <form class="login-form" method="post" action="/signup">
+            <h2>Create Account</h2>
+            
+            {% if error %}
+            <div class="general-error">
+                {{ error }}
+            </div>
+            {% endif %}
+            
+            <div class="form-group">
+                <label for="email">Email Address:</label>
+                <input type="email" id="email" name="email" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" id="password" name="password" required minlength="8">
+                <div class="password-requirements">
+                    <strong>Password must contain:</strong>
+                    <ul>
+                        <li>At least 8 characters</li>
+                        <li>At least one uppercase letter</li>
+                        <li>At least one lowercase letter</li>
+                        <li>At least one number</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="confirm_password">Confirm Password:</label>
+                <input type="password" id="confirm_password" name="confirm_password" required>
+            </div>
+            
+            <button type="submit" class="login-btn">Create Account</button>
+            
+            <div class="login-link">
+                Already have an account? <a href="/login">Sign in here</a>
+            </div>
+        </form>
+    </div>
+    
+    <script src="{{ url_for('static', path='/js/signup.js') }}" defer></script>
+</body>
+</html>

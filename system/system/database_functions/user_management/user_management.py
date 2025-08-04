@@ -1,8 +1,9 @@
 """User management operations for database interactions using Object-Oriented Programming.
 
 This module provides a comprehensive UserManager class for handling all user-related
-database operations including CRUD operations, batch operations, and search functionality.
-All operations are transactional and include proper error handling and validation.
+database operations including CRUD operations, batch operations, and search 
+functionality. All operations are transactional and include proper error handling 
+and validation.
 
 Example:
     Basic user management operations using the UserManager class:
@@ -46,8 +47,15 @@ from system.system.database_functions.exceptions import (
     UserDeleteError,
     UserAlreadyExistsException,
 )
-from system.system.database_functions.user_management.user_management_constants import USER_ALREADY_EXISTS, USER_NOT_FOUND, USERS_TABLE
-from system.system.database_functions.user_management.validations import UserCreate, UserUpdate
+from system.system.database_functions.user_management.user_management_constants import (
+    USER_ALREADY_EXISTS,
+    USER_NOT_FOUND,
+    USERS_TABLE,
+)
+from system.system.database_functions.user_management.validations import (
+    UserCreate,
+    UserUpdate,
+)
 
 
 class UserManager:
@@ -65,7 +73,10 @@ class UserManager:
     Examples:
         >>> # Basic usage
         >>> user_manager = UserManager()
-        >>> user = user_manager.create_user({"email": "test@example.com", "name": "Test User"})
+        >>> user = user_manager.create_user({
+        ...     "email": "test@example.com", 
+        ...     "name": "Test User"
+        ... })
         >>> user_manager.close()
         >>> 
         >>> # Using as context manager (recommended)
@@ -76,8 +87,14 @@ class UserManager:
         >>> 
         >>> # Persistent connection for multiple operations
         >>> user_manager = UserManager(persistent_connection=True)
-        >>> user1 = user_manager.create_user({"email": "user1@example.com", "name": "User 1"})
-        >>> user2 = user_manager.create_user({"email": "user2@example.com", "name": "User 2"})
+        >>> user1 = user_manager.create_user({
+        ...     "email": "user1@example.com", 
+        ...     "name": "User 1"
+        ... })
+        >>> user2 = user_manager.create_user({
+        ...     "email": "user2@example.com", 
+        ...     "name": "User 2"
+        ... })
         >>> user_manager.close()  # Manual cleanup required
     """
     
@@ -85,8 +102,9 @@ class UserManager:
         """Initialize the UserManager.
         
         Args:
-            persistent_connection: If True, maintains a persistent database connection.
-                                 If False, creates new connections for each operation.
+            persistent_connection: If True, maintains a persistent database 
+                                  connection. If False, creates new connections 
+                                  for each operation.
                                  
         Example:
             >>> # Standard usage (new connection per operation)
@@ -142,7 +160,8 @@ class UserManager:
         
         Args:
             user_data: Dictionary containing user information (email and name required)
-            join: Join control parameter (0=no joins, 1=forward joins, -1=backward joins)
+            join: Join control parameter (0=no joins, 1=forward joins, 
+                  -1=backward joins)
             
         Returns:
             Dictionary containing the created user data with database-generated fields
@@ -167,7 +186,11 @@ class UserManager:
         try:
             with self._get_db_connection() as db:
                 # Check if user already exists
-                existing_users = db.read(USERS_TABLE, {'email': validated_data.email}, join=join)
+                existing_users = db.read(
+                    USERS_TABLE, 
+                    {'email': validated_data.email}, 
+                    join=join
+                )
                 if existing_users:
                     raise UserAlreadyExistsException(USER_ALREADY_EXISTS)
                 
@@ -397,7 +420,8 @@ class UserManager:
             - non_existing_ids: List of IDs that don't exist in the database
             - non_existing_count: Number of non-existing IDs
             - total_requested: Total number of IDs requested for deletion
-            - success: Boolean indicating if all requested IDs were found and deleted
+            - success: Boolean indicating if all requested IDs were found 
+                      and deleted
             
         Raises:
             UserDeleteError: If a database error occurs during the operation
@@ -472,7 +496,8 @@ class UserManager:
         Args:
             limit: Maximum number of users to return (default: 100)
             offset: Number of users to skip (default: 0)
-            search: Search term for filtering by username, first_name, or last_name
+            search: Search term for filtering by username, first_name, or 
+                    last_name
             join: Join control parameter:
                 - 0 (default): No joins, return only user data
                 - 1: Forward joins (fetch related data from referenced tables)
