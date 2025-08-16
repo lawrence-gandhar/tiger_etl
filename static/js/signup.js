@@ -7,7 +7,7 @@ class SignupValidator {
     constructor() {
         this.emailField = document.getElementById('email');
         this.passwordField = document.getElementById('password');
-        this.confirmPasswordField = document.getElementById('confirm_password');
+        this.confirmPasswordField = document.getElementById('confirm_passwd');
         this.submitButton = document.querySelector('.login-btn');
         this.form = document.querySelector('.login-form');
         
@@ -337,7 +337,7 @@ const Utils = {
 document.addEventListener('DOMContentLoaded', () => {
     // Check if we're specifically on the signup page
     const signupForm = document.querySelector('form[action="/signup"]');
-    const confirmPasswordField = document.getElementById('confirm_password');
+    const confirmPasswordField = document.getElementById('confirm_passwd');
     
     // Only initialize if we're on the signup page with the signup form
     if (signupForm && confirmPasswordField) {
