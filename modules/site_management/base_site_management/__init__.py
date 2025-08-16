@@ -1,0 +1,47 @@
+# Base Site Management Module
+"""
+This module provides base functionality for site management in the Tiger ETL application.
+It includes template constants and base utilities for managing site-wide functionality.
+"""
+
+from .base_templates_constants import (
+    LOGIN_TEMPLATE,
+    SIGNUP_TEMPLATE,
+    DASHBOARD_TEMPLATE,
+    HOME_TEMPLATE,
+    USER_PROFILE_TEMPLATE,
+    USER_LIST_TEMPLATE,
+    ERROR_404_TEMPLATE,
+    ERROR_500_TEMPLATE,
+    CONTACT_TEMPLATE,
+    SETTINGS_TEMPLATE,
+    DATA_UPLOAD_TEMPLATE,
+    DATA_VIEW_TEMPLATE,
+    PIPELINE_TEMPLATE,
+    REPORT_LIST_TEMPLATE,
+    REPORT_DETAIL_TEMPLATE,
+    ADMIN_DASHBOARD_TEMPLATE,
+    ADMIN_USERS_TEMPLATE,
+    ALL_TEMPLATES
+)
+
+__all__ = [
+    "LOGIN_TEMPLATE",
+    "SIGNUP_TEMPLATE",
+    "DASHBOARD_TEMPLATE",
+    "HOME_TEMPLATE",
+    "USER_PROFILE_TEMPLATE",
+    "USER_LIST_TEMPLATE",
+    "ERROR_404_TEMPLATE",
+    "ERROR_500_TEMPLATE",
+    "CONTACT_TEMPLATE",
+    "SETTINGS_TEMPLATE",
+    "DATA_UPLOAD_TEMPLATE",
+    "DATA_VIEW_TEMPLATE",
+    "PIPELINE_TEMPLATE",
+    "REPORT_LIST_TEMPLATE",
+    "REPORT_DETAIL_TEMPLATE",
+    "ADMIN_DASHBOARD_TEMPLATE",
+    "ADMIN_USERS_TEMPLATE",
+    "ALL_TEMPLATES"
+]

@@ -9,36 +9,29 @@ import re
 
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
-# Import constants from the constants module
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'constants'))
-
-try:
-    from constants import (
-        USERNAME_EMPTY_ERROR,
-        USERNAME_FORMAT_ERROR,
-        USERNAME_START_ERROR,
-        PASSWORD_LENGTH_ERROR,
-        PASSWORD_UPPERCASE_ERROR,
-        PASSWORD_LOWERCASE_ERROR,
-        PASSWORD_DIGIT_ERROR,
-        PASSWORD_SPECIAL_ERROR,
-        PASSWORD_EMPTY_ERROR,
-        NAME_FORMAT_ERROR,
-    )
-except ImportError:
-    # Fallback constants if import fails
-    USERNAME_EMPTY_ERROR = "Username cannot be empty"
-    USERNAME_FORMAT_ERROR = "Username can only contain letters, numbers, underscores, and hyphens"
-    USERNAME_START_ERROR = "Username cannot start with a number"
-    PASSWORD_LENGTH_ERROR = "Password must be at least 8 characters long"
-    PASSWORD_UPPERCASE_ERROR = "Password must contain at least one uppercase letter"
-    PASSWORD_LOWERCASE_ERROR = "Password must contain at least one lowercase letter"
-    PASSWORD_DIGIT_ERROR = "Password must contain at least one digit"
-    PASSWORD_SPECIAL_ERROR = "Password must contain at least one special character"
-    PASSWORD_EMPTY_ERROR = "Password cannot be empty"
-    NAME_FORMAT_ERROR = "Names can only contain letters, spaces, hyphens, and apostrophes"
+# Import constants from the user_management_constants module
+from system.system.database_functions.user_management.user_management_constants import (
+    EMAIL_PATTERN,
+    USERNAME_EMPTY_ERROR,
+    USERNAME_FORMAT_ERROR,
+    PASSWORD_LENGTH_ERROR,
+    PASSWORD_UPPERCASE_ERROR,
+    PASSWORD_LOWERCASE_ERROR,
+    PASSWORD_DIGIT_ERROR,
+    PASSWORD_SPECIAL_ERROR,
+    PASSWORD_EMPTY_ERROR,
+    NAME_FORMAT_ERROR,
+    USERNAME_MIN_LENGTH,
+    USERNAME_MAX_LENGTH,
+    PASSWORD_MIN_LENGTH,
+    PASSWORD_MAX_LENGTH,
+    NAME_MAX_LENGTH,
+    NAME_PATTERN,
+    PASSWORD_UPPERCASE_PATTERN,
+    PASSWORD_LOWERCASE_PATTERN,
+    PASSWORD_DIGIT_PATTERN,
+    PASSWORD_SPECIAL_PATTERN,
+)
 
 
 class UserBase(BaseModel):
@@ -48,7 +41,7 @@ class UserBase(BaseModel):
     across different user operations.
     
     Attributes:
-        username: Unique username (3-50 characters)
+        username: Email address used as username (valid email format required)
         first_name: Optional first name (max 50 characters)
         last_name: Optional last name (max 50 characters)
         is_active: Boolean flag for user status (default: True)
@@ -56,18 +49,18 @@ class UserBase(BaseModel):
     
     username: str = Field(
         ...,
-        min_length=3,
-        max_length=50,
-        description="Username must be 3-50 characters"
+        min_length=USERNAME_MIN_LENGTH,
+        max_length=USERNAME_MAX_LENGTH,
+        description="Email address used as username"
     )
     first_name: Optional[str] = Field(
         default=None,
-        max_length=50,
+        max_length=NAME_MAX_LENGTH,
         description="First name (optional)"
     )
     last_name: Optional[str] = Field(
         default=None,
-        max_length=50,
+        max_length=NAME_MAX_LENGTH,
         description="Last name (optional)"
     )
     is_active: bool = Field(
@@ -78,30 +71,28 @@ class UserBase(BaseModel):
     @field_validator('username')
     @classmethod
     def validate_username(cls, v: str) -> str:
-        """Validate username format and constraints.
+        """Validate email address format for username.
         
         Args:
-            v: The username string to validate
+            v: The email address string to validate
             
         Returns:
-            str: Validated and normalized username (lowercase)
+            str: Validated and normalized email address (lowercase)
             
         Raises:
-            ValueError: If username is empty, contains invalid characters,
-                       or starts with a number
+            ValueError: If email address is empty or has invalid format
         """
         if not v:
             raise ValueError(USERNAME_EMPTY_ERROR)
         
-        # Username should contain only alphanumeric characters, underscores, and hyphens
-        if not re.match(r'^[a-zA-Z0-9_-]+$', v):
-            raise ValueError(USERNAME_FORMAT_ERROR)
+        # Convert to lowercase for consistency
+        v = v.lower().strip()
         
-        # Username should not start with a number
-        if v[0].isdigit():
-            raise ValueError(USERNAME_START_ERROR)
+        # Basic email format validation using regex
+        if not re.match(EMAIL_PATTERN, v):
+            raise ValueError(USERNAME_FORMAT_ERROR)
             
-        return v.lower()  # Convert to lowercase for consistency
+        return v
 
     @field_validator('first_name', 'last_name')
     @classmethod
@@ -123,7 +114,7 @@ class UserBase(BaseModel):
                 return None  # Convert empty strings to None
             
             # Names should contain only letters, spaces, hyphens, and apostrophes
-            if not re.match(r"^[a-zA-Z\s\-']+$", v):
+            if not re.match(NAME_PATTERN, v):
                 raise ValueError(NAME_FORMAT_ERROR)
                 
             return v.title()  # Convert to title case
@@ -141,8 +132,8 @@ class UserCreate(UserBase):
     
     passwd: str = Field(
         ...,
-        min_length=8,
-        max_length=255,
+        min_length=PASSWORD_MIN_LENGTH,
+        max_length=PASSWORD_MAX_LENGTH,
         description="Password must be at least 8 characters"
     )
 
@@ -167,23 +158,23 @@ class UserCreate(UserBase):
         Raises:
             ValueError: If password doesn't meet strength requirements
         """
-        if len(v) < 8:
+        if len(v) < PASSWORD_MIN_LENGTH:
             raise ValueError(PASSWORD_LENGTH_ERROR)
         
         # Check for at least one uppercase letter
-        if not re.search(r'[A-Z]', v):
+        if not re.search(PASSWORD_UPPERCASE_PATTERN, v):
             raise ValueError(PASSWORD_UPPERCASE_ERROR)
         
         # Check for at least one lowercase letter
-        if not re.search(r'[a-z]', v):
+        if not re.search(PASSWORD_LOWERCASE_PATTERN, v):
             raise ValueError(PASSWORD_LOWERCASE_ERROR)
         
         # Check for at least one digit
-        if not re.search(r'\d', v):
+        if not re.search(PASSWORD_DIGIT_PATTERN, v):
             raise ValueError(PASSWORD_DIGIT_ERROR)
         
         # Check for at least one special character
-        if not re.search(r'[!@#$%^&*()_+\-=\[\]{};:"\\|,.<>\/?]', v):
+        if not re.search(PASSWORD_SPECIAL_PATTERN, v):
             raise ValueError(PASSWORD_SPECIAL_ERROR)
         
         return v
@@ -195,7 +186,7 @@ class UserUpdate(BaseModel):
     All fields are optional to allow partial updates.
     
     Attributes:
-        username: Optional username update
+        username: Optional email address update (used as username)
         passwd: Optional password update
         first_name: Optional first name update
         last_name: Optional last name update
@@ -204,24 +195,24 @@ class UserUpdate(BaseModel):
     
     username: Optional[str] = Field(
         default=None,
-        min_length=3,
-        max_length=50,
-        description="Username must be 3-50 characters"
+        min_length=USERNAME_MIN_LENGTH,
+        max_length=USERNAME_MAX_LENGTH,
+        description="Email address used as username"
     )
     passwd: Optional[str] = Field(
         default=None,
-        min_length=8,
-        max_length=255,
+        min_length=PASSWORD_MIN_LENGTH,
+        max_length=PASSWORD_MAX_LENGTH,
         description="Password must be at least 8 characters"
     )
     first_name: Optional[str] = Field(
         default=None,
-        max_length=50,
+        max_length=NAME_MAX_LENGTH,
         description="First name (optional)"
     )
     last_name: Optional[str] = Field(
         default=None,
-        max_length=50,
+        max_length=NAME_MAX_LENGTH,
         description="Last name (optional)"
     )
     is_active: Optional[bool] = Field(
@@ -232,28 +223,29 @@ class UserUpdate(BaseModel):
     @field_validator('username')
     @classmethod
     def validate_username(cls, v: Optional[str]) -> Optional[str]:
-        """Validate username format for updates.
+        """Validate email address format for username updates.
         
         Args:
-            v: The username string to validate (can be None)
+            v: The email address string to validate (can be None)
             
         Returns:
-            Optional[str]: Validated and normalized username or None
+            Optional[str]: Validated and normalized email address or None
             
         Raises:
-            ValueError: If username is provided but invalid
+            ValueError: If email address is provided but invalid
         """
         if v is not None:
             if not v:
                 raise ValueError(USERNAME_EMPTY_ERROR)
             
-            if not re.match(r'^[a-zA-Z0-9_-]+$', v):
-                raise ValueError(USERNAME_FORMAT_ERROR)
+            # Convert to lowercase for consistency
+            v = v.lower().strip()
             
-            if v[0].isdigit():
-                raise ValueError(USERNAME_START_ERROR)
+            # Basic email format validation using regex
+            if not re.match(EMAIL_PATTERN, v):
+                raise ValueError(USERNAME_FORMAT_ERROR)
                 
-            return v.lower()
+            return v
         return v
     
     @field_validator('passwd')
@@ -271,19 +263,19 @@ class UserUpdate(BaseModel):
             ValueError: If password is provided but doesn't meet requirements
         """
         if v is not None:
-            if len(v) < 8:
+            if len(v) < PASSWORD_MIN_LENGTH:
                 raise ValueError(PASSWORD_LENGTH_ERROR)
             
-            if not re.search(r'[A-Z]', v):
+            if not re.search(PASSWORD_UPPERCASE_PATTERN, v):
                 raise ValueError(PASSWORD_UPPERCASE_ERROR)
             
-            if not re.search(r'[a-z]', v):
+            if not re.search(PASSWORD_LOWERCASE_PATTERN, v):
                 raise ValueError(PASSWORD_LOWERCASE_ERROR)
             
-            if not re.search(r'\d', v):
+            if not re.search(PASSWORD_DIGIT_PATTERN, v):
                 raise ValueError(PASSWORD_DIGIT_ERROR)
             
-            if not re.search(r'[!@#$%^&*()_+\-=\[\]{};:"\\|,.<>\/?]', v):
+            if not re.search(PASSWORD_SPECIAL_PATTERN, v):
                 raise ValueError(PASSWORD_SPECIAL_ERROR)
         
         return v
@@ -307,7 +299,7 @@ class UserUpdate(BaseModel):
             if len(v) == 0:
                 return None
             
-            if not re.match(r"^[a-zA-Z\s\-']+$", v):
+            if not re.match(NAME_PATTERN, v):
                 raise ValueError(NAME_FORMAT_ERROR)
                 
             return v.title()
@@ -335,15 +327,15 @@ class UserLogin(BaseModel):
     Simple model for login credentials validation.
     
     Attributes:
-        username: Username for authentication
+        username: Email address used as username for authentication
         passwd: Password for authentication
     """
     
     username: str = Field(
         ...,
-        min_length=3,
-        max_length=50,
-        description="Username for authentication"
+        min_length=USERNAME_MIN_LENGTH,
+        max_length=USERNAME_MAX_LENGTH,
+        description="Email address used as username for authentication"
     )
     passwd: str = Field(
         ...,
@@ -354,20 +346,28 @@ class UserLogin(BaseModel):
     @field_validator('username')
     @classmethod
     def validate_username(cls, v: str) -> str:
-        """Validate username for login.
+        """Validate email address format for login.
         
         Args:
-            v: The username string to validate
+            v: The email address string to validate
             
         Returns:
-            str: Normalized username (lowercase)
+            str: Normalized email address (lowercase)
             
         Raises:
-            ValueError: If username is empty
+            ValueError: If email address is empty or invalid format
         """
         if not v:
             raise ValueError(USERNAME_EMPTY_ERROR)
-        return v.lower()
+        
+        # Convert to lowercase for consistency
+        v = v.lower().strip()
+        
+        # Basic email format validation using regex
+        if not re.match(EMAIL_PATTERN, v):
+            raise ValueError(USERNAME_FORMAT_ERROR)
+            
+        return v
 
     @field_validator('passwd')
     @classmethod

@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Tiger ETL{% endblock %}</title>
+    
+    <!-- Bootstrap 5 CSS from CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Line Awesome Icons from CDN -->
+    <link rel="stylesheet" href="https://maxst.icons8.com/vue-static/landings/line-awesome/line-awesome/1.3.0/css/line-awesome.min.css">
+    
+    <!-- Custom CSS -->
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow-x: hidden;
+        }
+        
+        /* Sidebar Styles */
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            width: 250px;
+            background: linear-gradient(180deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            z-index: 1000;
+            overflow-y: auto;
+            transition: all 0.3s ease;
+        }
+        
+        .sidebar.collapsed {
+            width: 60px;
+        }
+        
+        .sidebar-header {
+            padding: 1rem;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            background: rgba(0,0,0,0.1);
+        }
+        
+        .sidebar-brand {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #fff;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+        }
+        
+        .sidebar-brand i {
+            margin-right: 10px;
+            font-size: 1.5rem;
+        }
+        
+        .sidebar.collapsed .sidebar-brand span {
+            display: none;
+        }
+        
+        .sidebar-menu {
+            padding: 0;
+            margin: 0;
+            list-style: none;
+        }
+        
+        .sidebar-menu li {
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        
+        .sidebar-menu a {
+            display: flex;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            transition: all 0.3s ease;
+        }
+        
+        .sidebar-menu a:hover,
+        .sidebar-menu a.active {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+        }
+        
+        .sidebar-menu i {
+            width: 20px;
+            margin-right: 10px;
+            text-align: center;
+        }
+        
+        .sidebar.collapsed .sidebar-menu span {
+            display: none;
+        }
+        
+        .sidebar-footer {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 1rem;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            background: rgba(0,0,0,0.1);
+        }
+        
+        /* Top Bar Styles */
+        .topbar {
+            position: fixed;
+            top: 0;
+            left: 250px;
+            right: 0;
+            height: 60px;
+            background: #fff;
+            border-bottom: 1px solid #e9ecef;
+            z-index: 999;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            padding: 0 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .topbar.expanded {
+            left: 60px;
+        }
+        
+        .sidebar-toggle {
+            background: none;
+            border: none;
+            font-size: 1.2rem;
+            color: #6c757d;
+            cursor: pointer;
+            margin-right: 1rem;
+        }
+        
+        .topbar-title {
+            flex-grow: 1;
+            font-size: 1.1rem;
+            font-weight: 500;
+            color: #495057;
+        }
+        
+        .user-dropdown {
+            position: relative;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            padding: 0.5rem;
+            border-radius: 0.375rem;
+            transition: background-color 0.15s ease-in-out;
+        }
+        
+        .user-info:hover {
+            background: #f8f9fa;
+        }
+        
+        .user-avatar {
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            background: #6f42c1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            margin-right: 0.5rem;
+        }
+        
+        /* Main Content Styles */
+        .main-content {
+            margin-left: 250px;
+            margin-top: 60px;
+            padding: 1.5rem;
+            min-height: calc(100vh - 60px);
+            transition: all 0.3s ease;
+            overflow-y: auto;
+            background: #f8f9fa;
+        }
+        
+        .main-content.expanded {
+            margin-left: 60px;
+        }
+        
+        .content-wrapper {
+            background: white;
+            border-radius: 0.5rem;
+            box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
+            padding: 1.5rem;
+            min-height: calc(100vh - 120px);
+        }
+        
+        /* Scrollbar Styles */
+        .sidebar::-webkit-scrollbar,
+        .main-content::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .sidebar::-webkit-scrollbar-track {
+            background: rgba(255,255,255,0.1);
+        }
+        
+        .sidebar::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.3);
+            border-radius: 3px;
+        }
+        
+        .main-content::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        
+        .main-content::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 3px;
+        }
+        
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-100%);
+            }
+            
+            .sidebar.show {
+                transform: translateX(0);
+            }
+            
+            .topbar {
+                left: 0;
+            }
+            
+            .main-content {
+                margin-left: 0;
+            }
+        }
+        
+        /* Additional utility classes */
+        .page-title {
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .card-stats {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+        }
+        
+        .card-stats .card-body {
+            padding: 1.5rem;
+        }
+        
+        .stats-icon {
+            font-size: 2rem;
+            opacity: 0.8;
+        }
+    </style>
+    
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <a href="/dashboard" class="sidebar-brand">
+                <i class="las la-database"></i>
+                <span>Tiger ETL</span>
+            </a>
+        </div>
+        
+        <ul class="sidebar-menu">
+            <li>
+                <a href="/dashboard" class="{% if request.url.path == '/dashboard' %}active{% endif %}">
+                    <i class="las la-tachometer-alt"></i>
+                    <span>Dashboard</span>
+                </a>
+            </li>
+            <li>
+                <a href="/pipelines" class="{% if request.url.path.startswith('/pipelines') %}active{% endif %}">
+                    <i class="las la-project-diagram"></i>
+                    <span>Pipelines</span>
+                </a>
+            </li>
+            <li>
+                <a href="/data-sources" class="{% if request.url.path.startswith('/data-sources') %}active{% endif %}">
+                    <i class="las la-database"></i>
+                    <span>Data Sources</span>
+                </a>
+            </li>
+            <li>
+                <a href="/transformations" class="{% if request.url.path.startswith('/transformations') %}active{% endif %}">
+                    <i class="las la-exchange-alt"></i>
+                    <span>Transformations</span>
+                </a>
+            </li>
+            <li>
+                <a href="/schedules" class="{% if request.url.path.startswith('/schedules') %}active{% endif %}">
+                    <i class="las la-clock"></i>
+                    <span>Schedules</span>
+                </a>
+            </li>
+            <li>
+                <a href="/monitoring" class="{% if request.url.path.startswith('/monitoring') %}active{% endif %}">
+                    <i class="las la-chart-line"></i>
+                    <span>Monitoring</span>
+                </a>
+            </li>
+            <li>
+                <a href="/logs" class="{% if request.url.path.startswith('/logs') %}active{% endif %}">
+                    <i class="las la-file-alt"></i>
+                    <span>Logs</span>
+                </a>
+            </li>
+            <li>
+                <a href="/settings" class="{% if request.url.path.startswith('/settings') %}active{% endif %}">
+                    <i class="las la-cog"></i>
+                    <span>Settings</span>
+                </a>
+            </li>
+            <li>
+                <a href="/users" class="{% if request.url.path.startswith('/users') %}active{% endif %}">
+                    <i class="las la-users"></i>
+                    <span>User Management</span>
+                </a>
+            </li>
+        </ul>
+        
+        <div class="sidebar-footer">
+            <div class="text-center">
+                <small>&copy; 2025 Tiger ETL</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Bar -->
+    <div class="topbar" id="topbar">
+        <button class="sidebar-toggle" id="sidebarToggle">
+            <i class="las la-bars"></i>
+        </button>
+        
+        <div class="topbar-title">
+            {% block page_title %}Dashboard{% endblock %}
+        </div>
+        
+        <div class="user-dropdown">
+            <div class="user-info" data-bs-toggle="dropdown" aria-expanded="false">
+                <div class="user-avatar">
+                    {% if current_user and current_user.get('first_name') %}
+                        {{ current_user.get('first_name')[0].upper() }}
+                    {% else %}
+                        U
+                    {% endif %}
+                </div>
+                <div class="d-none d-md-block">
+                    <div class="fw-semibold">
+                        {% if current_user and current_user.get('first_name') %}
+                            {{ current_user.get('first_name') }} {{ current_user.get('last_name', '') }}
+                        {% else %}
+                            User
+                        {% endif %}
+                    </div>
+                    <small class="text-muted">
+                        {% if current_user and current_user.get('username') %}
+                            {{ current_user.get('username') }}
+                        {% else %}
+                            user@example.com
+                        {% endif %}
+                    </small>
+                </div>
+                <i class="las la-chevron-down ms-2"></i>
+            </div>
+            
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="/profile"><i class="las la-user me-2"></i>Profile</a></li>
+                <li><a class="dropdown-item" href="/settings"><i class="las la-cog me-2"></i>Settings</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item" href="/logout"><i class="las la-sign-out-alt me-2"></i>Logout</a></li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content" id="mainContent">
+        <div class="content-wrapper">
+            {% block content %}
+            <!-- Page content goes here -->
+            {% endblock %}
+        </div>
+    </div>
+
+    <!-- Bootstrap 5 JavaScript Bundle with Popper from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- jQuery from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+    
+    <!-- Custom JavaScript -->
+    <script>
+        $(document).ready(function() {
+            // Sidebar toggle functionality
+            $('#sidebarToggle').click(function() {
+                $('#sidebar').toggleClass('collapsed');
+                $('#topbar').toggleClass('expanded');
+                $('#mainContent').toggleClass('expanded');
+            });
+
+            // Mobile sidebar toggle
+            if (window.innerWidth <= 768) {
+                $('#sidebarToggle').click(function() {
+                    $('#sidebar').toggleClass('show');
+                });
+            }
+
+            // Close sidebar on mobile when clicking outside
+            $(document).click(function(e) {
+                if (window.innerWidth <= 768) {
+                    if (!$(e.target).closest('#sidebar, #sidebarToggle').length) {
+                        $('#sidebar').removeClass('show');
+                    }
+                }
+            });
+
+            // Handle window resize
+            $(window).resize(function() {
+                if (window.innerWidth > 768) {
+                    $('#sidebar').removeClass('show');
+                }
+            });
+        });
+    </script>
+    
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
