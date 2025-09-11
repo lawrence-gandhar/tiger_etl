@@ -13,22 +13,11 @@ from modules.security_management.exceptions import (
    SignupError
 )
 
-from email_validator import EmailNotValidError, validate_email
-
-
 # --------------------
 # Utility functions
 # --------------------
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
-
-
-def validate_email_format(email: str) -> str:
-    try:
-        validated_email = validate_email(email, check_deliverability=False)
-        return validated_email.email
-    except EmailNotValidError as e:
-        raise SignupError(f"Invalid email format: {str(e)}")
 
 
 def validate_password_strength(password: str) -> None:
